@@ -1,21 +1,22 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
+  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}', './lib/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        ink: '#07080d',
-        panel: '#11131c',
-        panelSoft: '#181b27',
-        line: '#262a3a',
+        app: '#05060b',
+        phone: 'rgba(12, 15, 24, 0.92)',
+        card: 'rgba(15, 18, 30, 0.78)',
+        line: 'rgba(255,255,255,0.08)',
         brand: '#7c3aed',
-        brandSoft: '#a855f7',
-        success: '#22c55e',
-        warning: '#f59e0b'
+        brandDark: '#4c1d95',
+        brandSoft: '#a855f7'
       },
       boxShadow: {
-        glow: '0 20px 80px rgba(124,58,237,.25)'
+        glow: '0 18px 60px rgba(124, 58, 237, 0.35)',
+        soft: '0 24px 80px rgba(0, 0, 0, 0.35)',
+        phone: '0 30px 100px rgba(0, 0, 0, 0.45)'
       }
     }
   },
