@@ -6,24 +6,26 @@ Sistema web para assistência técnica com controle de ordens de serviço, clien
 
 O AssistPro nasce para a JR Celular, mas já foi estruturado pensando em futuramente virar SaaS para outras assistências técnicas.
 
-### Funcionalidades da primeira versão
+## Funcionalidades já estruturadas
 
-- Dashboard operacional
-- Cadastro de clientes
-- Cadastro e acompanhamento de ordens de serviço
-- Controle de etapas da OS
-- Orçamento e aprovação
-- Histórico de movimentações
-- Tela de atendimentos WhatsApp simulada/preparada
-- Estrutura Supabase com RLS
-- Layout responsivo para celular
+- Dashboard operacional responsivo
+- Lista de ordens de serviço
+- Detalhe de OS com linha do tempo de status
+- Painel de atendimentos WhatsApp
+- Simulação de chat com IA e áudio
+- Estrutura inicial para Evolution API
+- Schema Supabase multiempresa com RLS
+- Layout mobile-first em dark mode
 
-### Próximas integrações
+## Próximas integrações
 
-- Evolution API para WhatsApp
-- Consulta automática de OS pelo WhatsApp
-- IA para atendimento em texto e áudio
-- Voz autorizada do proprietário
+- Autenticação Supabase real
+- CRUD completo de clientes, aparelhos e OS
+- Storage para fotos do aparelho
+- Evolution API recebendo e enviando mensagens reais
+- IA para classificar intenção do cliente
+- Transcrição de áudio do cliente
+- Resposta em áudio com voz autorizada do JR
 - Relatórios financeiros e produtividade dos técnicos
 
 ## Stack
@@ -33,6 +35,7 @@ O AssistPro nasce para a JR Celular, mas já foi estruturado pensando em futuram
 - Tailwind CSS
 - Supabase
 - Vercel
+- Evolution API
 
 ## Como rodar
 
@@ -45,4 +48,12 @@ Copie `.env.example` para `.env.local` e preencha as variáveis do Supabase e Ev
 
 ## Banco de dados
 
-O arquivo `supabase/schema.sql` contém a estrutura inicial do banco.
+Rode o arquivo `supabase/schema.sql` no SQL Editor do Supabase.
+
+## Deploy
+
+1. Crie o projeto no Supabase.
+2. Rode o schema SQL.
+3. Crie um projeto na Vercel conectado a este repositório.
+4. Configure as variáveis de ambiente.
+5. Faça o deploy.
