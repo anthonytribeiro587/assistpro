@@ -1,3 +1,4 @@
+import type { ElementType } from 'react';
 import { ArrowRight, Bot, CalendarClock, CheckCircle2, CircleDollarSign, Clock, MessageCircle, Mic2, Plus, Search, ShieldCheck, Smartphone, UserRound, Wrench } from 'lucide-react';
 import { conversations, serviceOrders, statusLabels, type ServiceOrderStatus } from '@/lib/mock-data';
 
@@ -18,7 +19,7 @@ const statusTone: Record<ServiceOrderStatus, string> = {
 
 const timeline: ServiceOrderStatus[] = ['recebido', 'analise', 'orcamento_enviado', 'aguardando_aprovacao', 'em_execucao', 'testes', 'pronto', 'entregue'];
 
-function KpiCard({ title, value, helper, icon: Icon }: { title: string; value: string; helper: string; icon: React.ElementType }) {
+function KpiCard({ title, value, helper, icon: Icon }: { title: string; value: string; helper: string; icon: ElementType }) {
   return (
     <div className="rounded-3xl border border-line bg-panel/80 p-5 shadow-glow backdrop-blur">
       <div className="flex items-center justify-between gap-4">
@@ -209,7 +210,7 @@ function WhatsappPanel() {
 }
 
 function Roadmap() {
-  const items = [
+  const items: Array<{ title: string; text: string; icon: ElementType }> = [
     { title: 'MVP de OS', text: 'Clientes, aparelhos, orçamento, etapas, histórico e relatórios básicos.', icon: Smartphone },
     { title: 'Evolution API', text: 'Envio de status, consulta de OS e atendimento pelo WhatsApp.', icon: MessageCircle },
     { title: 'IA com segurança', text: 'Responde dúvidas, entende áudio e transfere casos delicados para humano.', icon: ShieldCheck },
@@ -218,16 +219,19 @@ function Roadmap() {
 
   return (
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {items.map((item, index) => (
-        <div key={item.title} className="rounded-3xl border border-line bg-panel/70 p-5">
-          <div className="mb-5 flex items-center justify-between">
-            <span className="text-sm text-slate-500">Fase {index + 1}</span>
-            <item.icon className="h-5 w-5 text-brandSoft" />
+      {items.map((item, index) => {
+        const Icon = item.icon;
+        return (
+          <div key={item.title} className="rounded-3xl border border-line bg-panel/70 p-5">
+            <div className="mb-5 flex items-center justify-between">
+              <span className="text-sm text-slate-500">Fase {index + 1}</span>
+              <Icon className="h-5 w-5 text-brandSoft" />
+            </div>
+            <h3 className="text-lg font-semibold">{item.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{item.text}</p>
           </div>
-          <h3 className="text-lg font-semibold">{item.title}</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-400">{item.text}</p>
-        </div>
-      ))}
+        );
+      })}
     </section>
   );
 }
