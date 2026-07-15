@@ -1,22 +1,29 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}', './lib/**/*.{js,ts,jsx,tsx,mdx}'],
+  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}', './features/**/*.{js,ts,jsx,tsx,mdx}', './lib/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        app: '#05060b',
-        phone: 'rgba(12, 15, 24, 0.92)',
-        card: 'rgba(15, 18, 30, 0.78)',
-        line: 'rgba(255,255,255,0.08)',
-        brand: '#7c3aed',
+        app: '#f5f6fb',
+        ink: '#101828',
+        muted: '#667085',
+        line: '#e6e8f0',
+        brand: '#6d28d9',
         brandDark: '#4c1d95',
-        brandSoft: '#a855f7'
+        brandSoft: '#8b5cf6',
+        brandLight: '#f3edff',
+        success: '#16a34a',
+        warning: '#f59e0b',
+        danger: '#dc2626'
       },
       boxShadow: {
-        glow: '0 18px 60px rgba(124, 58, 237, 0.35)',
-        soft: '0 24px 80px rgba(0, 0, 0, 0.35)',
-        phone: '0 30px 100px rgba(0, 0, 0, 0.45)'
+        card: '0 18px 50px rgba(16, 24, 40, 0.08)',
+        soft: '0 10px 30px rgba(109, 40, 217, 0.16)',
+        glow: '0 16px 40px rgba(109, 40, 217, 0.28)'
+      },
+      borderRadius: {
+        '2xl-plus': '1.35rem'
       }
     }
   },
