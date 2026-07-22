@@ -95,44 +95,57 @@ function rewriteNegativeResult(payload: unknown) {
   return { payload: clone, rewritten };
 }
 
-function validatedN8nUrl() {
-  const raw = process.env.N8N_WEBHOOK_URL?.trim();
+function validatedMakeUrl() {
+  const raw = process.env.MAKE_WEBHOOK_URL?.trim();
   if (!raw) return null;
 
   const url = new URL(raw);
-  const isLocal = ['localhost', '127.0.0.1'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !isLocal) {
-    throw new Error('N8N_WEBHOOK_URL deve utilizar HTTPS.');
+  if (url.protocol !== 'https:') {
+    throw new Error('MAKE_WEBHOOK_URL deve utilizar HTTPS.');
   }
   return url;
 }
 
-async function forwardToN8n(request: NextRequest, payload: unknown, n8nUrl: URL) {
-  const secret = process.env.N8N_WEBHOOK_SECRET?.trim();
-  if (!secret) throw new Error('N8N_WEBHOOK_SECRET não está configurado.');
+async function readMakeResponse(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
 
-  const response = await fetch(n8nUrl, {
+async function forwardToMake(request: NextRequest, payload: unknown, makeUrl: URL) {
+  const apiKey = process.env.MAKE_WEBHOOK_API_KEY?.trim();
+  if (!apiKey) throw new Error('MAKE_WEBHOOK_API_KEY não está configurada.');
+
+  const response = await fetch(makeUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-assistpro-n8n-secret': secret
+      'x-make-apikey': apiKey
     },
     body: JSON.stringify({
       source: 'assistpro',
       receivedAt: new Date().toISOString(),
-      callbackUrl: new URL('/api/n8n/respond', request.nextUrl.origin).toString(),
+      callbackUrl: new URL('/api/make/respond', request.nextUrl.origin).toString(),
       payload
     }),
     cache: 'no-store',
-    signal: AbortSignal.timeout(20_000)
+    signal: AbortSignal.timeout(30_000)
   });
 
-  const result = await response.json().catch(() => ({}));
+  const result = await readMakeResponse(response);
   if (!response.ok) {
-    throw new Error(result?.message || result?.error || `n8n respondeu HTTP ${response.status}.`);
+    const detail =
+      typeof result === 'object' && result
+        ? (result as any).message || (result as any).error
+        : result;
+    throw new Error(detail || `Make respondeu HTTP ${response.status}.`);
   }
 
-  return NextResponse.json({ ok: true, mode: 'n8n', result });
+  return NextResponse.json({ ok: true, mode: 'make', result });
 }
 
 async function forwardToSafeFallback(request: NextRequest, payload: unknown) {
@@ -160,9 +173,14 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: 'AssistPro WhatsApp orchestrator',
-    mode: process.env.N8N_WEBHOOK_URL ? 'n8n' : 'safe-rules-fallback',
-    n8nConfigured: Boolean(process.env.N8N_WEBHOOK_URL && process.env.N8N_WEBHOOK_SECRET),
-    audioConfigured: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID)
+    mode: process.env.MAKE_WEBHOOK_URL ? 'make' : 'safe-rules-fallback',
+    makeConfigured: Boolean(
+      process.env.MAKE_WEBHOOK_URL && process.env.MAKE_WEBHOOK_API_KEY
+    ),
+    callbackConfigured: Boolean(process.env.MAKE_CALLBACK_SECRET),
+    audioConfigured: Boolean(
+      process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID
+    )
   });
 }
 
@@ -175,8 +193,8 @@ export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => ({}));
 
   try {
-    const n8nUrl = validatedN8nUrl();
-    if (n8nUrl) return await forwardToN8n(request, payload, n8nUrl);
+    const makeUrl = validatedMakeUrl();
+    if (makeUrl) return await forwardToMake(request, payload, makeUrl);
     return await forwardToSafeFallback(request, payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Falha no orquestrador do WhatsApp.';
