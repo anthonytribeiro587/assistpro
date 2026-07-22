@@ -78,8 +78,9 @@ export async function GET(request: NextRequest) {
     webhookSecret: configured(process.env.WHATSAPP_WEBHOOK_SECRET),
     supabaseUrl: configured(process.env.NEXT_PUBLIC_SUPABASE_URL),
     supabaseServiceRole: configured(process.env.SUPABASE_SERVICE_ROLE_KEY),
-    n8nWebhookUrl: configured(process.env.N8N_WEBHOOK_URL),
-    n8nWebhookSecret: configured(process.env.N8N_WEBHOOK_SECRET),
+    makeWebhookUrl: configured(process.env.MAKE_WEBHOOK_URL),
+    makeWebhookApiKey: configured(process.env.MAKE_WEBHOOK_API_KEY),
+    makeCallbackSecret: configured(process.env.MAKE_CALLBACK_SECRET),
     geminiApiKey: configured(process.env.GEMINI_API_KEY),
     openAiApiKey: configured(process.env.OPENAI_API_KEY),
     elevenLabsApiKey: configured(process.env.ELEVENLABS_API_KEY),
@@ -113,9 +114,10 @@ export async function GET(request: NextRequest) {
       },
       capabilities: {
         mode:
-          environment.n8nWebhookUrl && environment.n8nWebhookSecret
-            ? 'n8n-ai-orchestrator'
+          environment.makeWebhookUrl && environment.makeWebhookApiKey
+            ? 'make-ai-orchestrator'
             : 'safe-rules-fallback',
+        callbackReady: environment.makeCallbackSecret,
         naturalLanguageAi: environment.geminiApiKey || environment.openAiApiKey,
         incomingAudioTranscription: environment.openAiApiKey || environment.elevenLabsApiKey,
         audioReply: environment.elevenLabsApiKey && environment.elevenLabsVoiceId,
