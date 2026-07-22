@@ -46,6 +46,18 @@ async function inspectSupabase() {
 }
 
 export async function GET(request: NextRequest) {
+  let webhookConfigured = false;
+  let webhookError: string | null = null;
+
+  if (request.nextUrl.searchParams.get('apply') === '1') {
+    try {
+      await configureEvolutionWebhook(webhookUrl(request));
+      webhookConfigured = true;
+    } catch (error) {
+      webhookError = error instanceof Error ? error.message : 'Não foi possível configurar o webhook.';
+    }
+  }
+
   let evolution: Awaited<ReturnType<typeof getEvolutionConnectionState>> | null = null;
   let evolutionError: string | null = null;
 
@@ -74,7 +86,8 @@ export async function GET(request: NextRequest) {
       ok:
         Object.values(environment).every(Boolean) &&
         Boolean(evolution?.connected) &&
-        supabase.reachable,
+        supabase.reachable &&
+        !webhookError,
       project: 'assistpro',
       environment,
       evolution,
@@ -82,8 +95,9 @@ export async function GET(request: NextRequest) {
       supabase,
       webhook: {
         endpoint: webhookUrl(request).replace(/\?secret=.*/, '?secret=***'),
-        configuredByThisRoute: false,
-        setupMethod: 'POST'
+        configuredByThisRequest: webhookConfigured,
+        error: webhookError,
+        setupMethod: 'GET com apply=1 ou POST protegido'
       },
       trial: { activationCommand: 'TESTE JR' }
     },
