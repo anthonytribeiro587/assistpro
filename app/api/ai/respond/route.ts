@@ -10,11 +10,6 @@ type IntakeContext = {
   awaiting?: IntakeField;
 };
 
-type ChatMessage = {
-  role: 'user' | 'assistant';
-  content: string;
-};
-
 type ServiceOrderDraft = {
   number: string;
   customerName: string;
@@ -38,6 +33,49 @@ const humanHandoffKeywords = [
 ];
 
 const orderStatusKeywords = ['status da os', 'minha os', 'ficou pronto', 'está pronto', 'andamento do conserto'];
+
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const requestLog = new Map<string, number[]>();
+
+function sanitizeContext(value: unknown): IntakeContext {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const source = value as Record<string, unknown>;
+  const allowedAwaiting: IntakeField[] = ['device', 'issue', 'name', 'phone', null];
+  const awaiting = allowedAwaiting.includes(source.awaiting as IntakeField) ? (source.awaiting as IntakeField) : undefined;
+
+  const read = (field: string, maxLength: number) => {
+    const normalized = normalizeText(source[field]);
+    return normalized ? normalized.slice(0, maxLength) : undefined;
+  };
+
+  return {
+    customerName: read('customerName', 60),
+    phone: read('phone', 13)?.replace(/\D/g, ''),
+    deviceModel: read('deviceModel', 60),
+    issue: read('issue', 180),
+    awaiting
+  };
+}
+
+function checkRateLimit(request: Request) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  const clientId = forwardedFor || request.headers.get('x-real-ip') || 'local';
+  const now = Date.now();
+  const activeRequests = (requestLog.get(clientId) ?? []).filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS);
+
+  if (activeRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
+    requestLog.set(clientId, activeRequests);
+    return false;
+  }
+
+  activeRequests.push(now);
+  requestLog.set(clientId, activeRequests);
+  return true;
+}
 
 function normalizeText(value: unknown) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -200,11 +238,24 @@ function readOutputText(payload: unknown) {
     ?.text?.trim();
 }
 
-async function polishWithOpenAI(fallback: string, context: IntakeContext, history: ChatMessage[]) {
+async function polishWithOpenAI(fallback: string, context: IntakeContext) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     return { text: fallback, provider: 'demo-rules' as const };
+  }
+
+  const replacements: Array<[string, string]> = [];
+  let safeFallback = fallback;
+
+  if (context.customerName) {
+    safeFallback = safeFallback.replaceAll(context.customerName, '{{CLIENTE}}');
+    replacements.push(['{{CLIENTE}}', context.customerName]);
+  }
+
+  if (context.phone) {
+    safeFallback = safeFallback.replaceAll(context.phone, '{{TELEFONE}}');
+    replacements.push(['{{TELEFONE}}', context.phone]);
   }
 
   try {
@@ -225,7 +276,7 @@ async function polishWithOpenAI(fallback: string, context: IntakeContext, histor
               {
                 type: 'input_text',
                 text:
-                  'Você é o atendente virtual da JR Celular, assistência técnica em Sapucaia do Sul. Reescreva a resposta-base de forma humana, objetiva e acolhedora. Não invente preços, diagnósticos, prazos, estoque ou garantias. Não pule a pergunta indicada e não diga que o aparelho já foi consertado. Use no máximo 55 palavras.'
+                  'Você é o atendente virtual da JR Celular, assistência técnica em Sapucaia do Sul. Reescreva a resposta-base de forma humana, objetiva e acolhedora. Não invente preços, diagnósticos, prazos, estoque ou garantias. Preserve exatamente códigos de OS e placeholders entre chaves duplas. Não pule a pergunta indicada. Use no máximo 55 palavras.'
               }
             ]
           },
@@ -235,9 +286,10 @@ async function polishWithOpenAI(fallback: string, context: IntakeContext, histor
               {
                 type: 'input_text',
                 text: JSON.stringify({
-                  respostaBase: fallback,
-                  dadosColetados: context,
-                  ultimasMensagens: history.slice(-6)
+                  respostaBase: safeFallback,
+                  aparelho: context.deviceModel,
+                  defeitoRelatado: context.issue,
+                  proximaEtapa: context.awaiting
                 })
               }
             ]
@@ -252,26 +304,38 @@ async function polishWithOpenAI(fallback: string, context: IntakeContext, histor
     }
 
     const payload = await response.json();
-    return { text: readOutputText(payload) || fallback, provider: 'openai' as const };
+    let polishedText = readOutputText(payload) || safeFallback;
+
+    for (const [placeholder, originalValue] of replacements) {
+      polishedText = polishedText.replaceAll(placeholder, originalValue);
+    }
+
+    return { text: polishedText, provider: 'openai' as const };
   } catch {
     return { text: fallback, provider: 'demo-rules' as const };
   }
 }
 
 export async function POST(request: Request) {
+  if (!checkRateLimit(request)) {
+    return NextResponse.json({ error: 'Muitas mensagens em sequência. Tente novamente em alguns minutos.' }, { status: 429 });
+  }
+
   try {
     const body = (await request.json()) as {
       message?: unknown;
       context?: IntakeContext;
-      history?: ChatMessage[];
     };
 
     const message = normalizeText(body.message);
-    const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
-    const previousContext = body.context ?? {};
+    const previousContext = sanitizeContext(body.context);
 
     if (!message) {
       return NextResponse.json({ error: 'Mensagem obrigatória.' }, { status: 400 });
+    }
+
+    if (message.length > 600) {
+      return NextResponse.json({ error: 'A mensagem deve ter no máximo 600 caracteres.' }, { status: 400 });
     }
 
     if (includesAny(message, humanHandoffKeywords)) {
@@ -308,7 +372,7 @@ export async function POST(request: Request) {
 
     if (question) {
       nextContext.awaiting = question.awaiting;
-      const polished = await polishWithOpenAI(question.response, nextContext, [...history, { role: 'user', content: message }]);
+      const polished = await polishWithOpenAI(question.response, nextContext);
 
       return NextResponse.json({
         intent: 'intake',
@@ -323,7 +387,7 @@ export async function POST(request: Request) {
     const completeContext = nextContext as Required<Pick<IntakeContext, 'customerName' | 'phone' | 'deviceModel' | 'issue'>>;
     const serviceOrder = createOrder(completeContext);
     const fallback = `Perfeito, ${completeContext.customerName}. A triagem foi concluída e a OS ${serviceOrder.number} foi criada para o ${completeContext.deviceModel}. A equipe agora pode revisar o caso e confirmar diagnóstico, prazo e orçamento.`;
-    const polished = await polishWithOpenAI(fallback, { ...nextContext, awaiting: null }, [...history, { role: 'user', content: message }]);
+    const polished = await polishWithOpenAI(fallback, { ...nextContext, awaiting: null });
 
     return NextResponse.json({
       intent: 'create_order',
