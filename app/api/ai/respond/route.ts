@@ -1,48 +1,404 @@
 import { NextResponse } from 'next/server';
 
-const humanHandoffKeywords = ['reclamar', 'garantia', 'processo', 'procon', 'desconto', 'não gostei', 'ficou ruim', 'quero falar com'];
-const orderKeywords = ['os', 'ordem', 'ficou pronto', 'status', 'andamento', 'aparelho'];
-const quoteKeywords = ['valor', 'quanto', 'preço', 'orçamento', 'trocar', 'arrumar', 'consertar'];
+type IntakeField = 'device' | 'issue' | 'name' | 'phone' | null;
+
+type IntakeContext = {
+  customerName?: string;
+  phone?: string;
+  deviceModel?: string;
+  issue?: string;
+  awaiting?: IntakeField;
+};
+
+type ServiceOrderDraft = {
+  number: string;
+  customerName: string;
+  phone: string;
+  deviceModel: string;
+  issue: string;
+  status: 'Triagem concluída';
+  createdAt: string;
+};
+
+const humanHandoffKeywords = [
+  'reclamar',
+  'garantia',
+  'processo',
+  'procon',
+  'não gostei',
+  'ficou ruim',
+  'quero falar com alguém',
+  'quero falar com uma pessoa',
+  'atendente humano'
+];
+
+const orderStatusKeywords = ['status da os', 'minha os', 'ficou pronto', 'está pronto', 'andamento do conserto'];
+
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const requestLog = new Map<string, number[]>();
+
+function sanitizeContext(value: unknown): IntakeContext {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const source = value as Record<string, unknown>;
+  const allowedAwaiting: IntakeField[] = ['device', 'issue', 'name', 'phone', null];
+  const awaiting = allowedAwaiting.includes(source.awaiting as IntakeField) ? (source.awaiting as IntakeField) : undefined;
+
+  const read = (field: string, maxLength: number) => {
+    const normalized = normalizeText(source[field]);
+    return normalized ? normalized.slice(0, maxLength) : undefined;
+  };
+
+  return {
+    customerName: read('customerName', 60),
+    phone: read('phone', 13)?.replace(/\D/g, ''),
+    deviceModel: read('deviceModel', 60),
+    issue: read('issue', 180),
+    awaiting
+  };
+}
+
+function checkRateLimit(request: Request) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  const clientId = forwardedFor || request.headers.get('x-real-ip') || 'local';
+  const now = Date.now();
+  const activeRequests = (requestLog.get(clientId) ?? []).filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS);
+
+  if (activeRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
+    requestLog.set(clientId, activeRequests);
+    return false;
+  }
+
+  activeRequests.push(now);
+  requestLog.set(clientId, activeRequests);
+  return true;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizePhone(value: string) {
+  const digits = value.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 13 ? digits : undefined;
+}
+
+function titleCase(value: string) {
+  return value
+    .toLowerCase()
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function extractName(message: string, awaiting?: IntakeField) {
+  const explicitName = message.match(/(?:meu nome (?:é|e)|me chamo|sou)\s+([a-zà-ÿ][a-zà-ÿ\s'-]{1,50})/i)?.[1];
+  const candidate = explicitName ?? (awaiting === 'name' ? message : '');
+
+  if (!candidate || /\d/.test(candidate)) {
+    return undefined;
+  }
+
+  const cleaned = candidate.replace(/[.!?,;:]+$/g, '').trim();
+  const words = cleaned.split(/\s+/);
+
+  if (words.length > 5 || cleaned.length < 2 || cleaned.length > 60) {
+    return undefined;
+  }
+
+  return titleCase(cleaned);
+}
+
+function extractDevice(message: string, awaiting?: IntakeField) {
+  const patterns = [
+    /\biphone\s*(?:se|x[rs]?|\d{1,2})(?:\s*(?:pro|max|plus|mini))?\b/i,
+    /\b(?:samsung\s*)?(?:galaxy\s*)?[asmz]\s?\d{2,3}(?:\s*(?:ultra|fe|plus))?\b/i,
+    /\b(?:moto|motorola)\s+[a-z0-9+\- ]{1,24}\b/i,
+    /\b(?:redmi|xiaomi|poco)\s+[a-z0-9+\- ]{1,24}\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern)?.[0];
+    if (match) {
+      return match.replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  if (awaiting !== 'device') {
+    return undefined;
+  }
+
+  const cleaned = message.replace(/[.!?,;:]+$/g, '').trim();
+  return cleaned.length >= 2 && cleaned.length <= 50 ? cleaned : undefined;
+}
+
+function extractIssue(message: string, awaiting?: IntakeField) {
+  const issuePatterns: Array<[RegExp, string]> = [
+    [/caiu.*(?:água|agua)|molhou|oxid/i, 'Possível dano por líquido/oxidação'],
+    [/não liga|nao liga|morto|sem sinal de vida/i, 'Aparelho não liga'],
+    [/tela.*(?:quebrada|trincada|preta|apagada)|display|touch/i, 'Problema na tela/display'],
+    [/bateria|descarrega|não segura carga|nao segura carga/i, 'Problema de bateria'],
+    [/não (?:está )?carrega(?:ndo|r)?|nao (?:esta )?carrega(?:ndo|r)?|conector|carregamento/i, 'Problema de carregamento'],
+    [/câmera|camera|foco/i, 'Problema na câmera'],
+    [/microfone|alto.?falante|sem som|áudio|audio/i, 'Problema de áudio'],
+    [/travando|lento|reinicia|loop|software/i, 'Falha de software/desempenho']
+  ];
+
+  for (const [pattern, label] of issuePatterns) {
+    if (pattern.test(message)) {
+      return label;
+    }
+  }
+
+  if (awaiting !== 'issue') {
+    return undefined;
+  }
+
+  const cleaned = message.replace(/[.!?,;:]+$/g, '').trim();
+  return cleaned.length >= 4 && cleaned.length <= 180 ? cleaned : undefined;
+}
 
 function includesAny(message: string, keywords: string[]) {
-  return keywords.some((keyword) => message.includes(keyword));
+  const normalized = message.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function getProgress(context: IntakeContext) {
+  const completed = [context.deviceModel, context.issue, context.customerName, context.phone].filter(Boolean).length;
+  return completed * 25;
+}
+
+function nextQuestion(context: IntakeContext) {
+  if (!context.deviceModel) {
+    return {
+      awaiting: 'device' as const,
+      response: 'Para começar a triagem, qual é a marca e o modelo do aparelho? Exemplo: iPhone 13, Galaxy A54 ou Moto G84.'
+    };
+  }
+
+  if (!context.issue) {
+    return {
+      awaiting: 'issue' as const,
+      response: `Entendi, é um ${context.deviceModel}. O que aconteceu com o aparelho e quais sintomas ele apresenta?`
+    };
+  }
+
+  if (!context.customerName) {
+    return {
+      awaiting: 'name' as const,
+      response: 'Já registrei o aparelho e o problema. Qual é o seu nome para eu preparar a ordem de serviço?'
+    };
+  }
+
+  if (!context.phone) {
+    return {
+      awaiting: 'phone' as const,
+      response: `Obrigado, ${context.customerName}. Qual é o número de WhatsApp com DDD para vincular à OS?`
+    };
+  }
+
+  return null;
+}
+
+function createOrder(context: Required<Pick<IntakeContext, 'customerName' | 'phone' | 'deviceModel' | 'issue'>>): ServiceOrderDraft {
+  const suffix = String(Date.now()).slice(-5);
+
+  return {
+    number: `JR-${new Date().getFullYear()}-${suffix}`,
+    customerName: context.customerName,
+    phone: context.phone,
+    deviceModel: context.deviceModel,
+    issue: context.issue,
+    status: 'Triagem concluída',
+    createdAt: new Date().toISOString()
+  };
+}
+
+function readOutputText(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const response = payload as {
+    output_text?: string;
+    output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+  };
+
+  if (response.output_text?.trim()) {
+    return response.output_text.trim();
+  }
+
+  return response.output
+    ?.flatMap((item) => item.content ?? [])
+    .find((item) => item.type === 'output_text' && item.text?.trim())
+    ?.text?.trim();
+}
+
+async function polishWithOpenAI(fallback: string, context: IntakeContext) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    return { text: fallback, provider: 'demo-rules' as const };
+  }
+
+  const replacements: Array<[string, string]> = [];
+  let safeFallback = fallback;
+
+  if (context.customerName) {
+    safeFallback = safeFallback.replaceAll(context.customerName, '{{CLIENTE}}');
+    replacements.push(['{{CLIENTE}}', context.customerName]);
+  }
+
+  if (context.phone) {
+    safeFallback = safeFallback.replaceAll(context.phone, '{{TELEFONE}}');
+    replacements.push(['{{TELEFONE}}', context.phone]);
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-5',
+        store: false,
+        max_output_tokens: 140,
+        input: [
+          {
+            role: 'system',
+            content: [
+              {
+                type: 'input_text',
+                text:
+                  'Você é o atendente virtual da JR Celular, assistência técnica em Sapucaia do Sul. Reescreva a resposta-base de forma humana, objetiva e acolhedora. Não invente preços, diagnósticos, prazos, estoque ou garantias. Preserve exatamente códigos de OS e placeholders entre chaves duplas. Não pule a pergunta indicada. Use no máximo 55 palavras.'
+              }
+            ]
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: JSON.stringify({
+                  respostaBase: safeFallback,
+                  aparelho: context.deviceModel,
+                  defeitoRelatado: context.issue,
+                  proximaEtapa: context.awaiting
+                })
+              }
+            ]
+          }
+        ]
+      }),
+      signal: AbortSignal.timeout(10_000)
+    });
+
+    if (!response.ok) {
+      return { text: fallback, provider: 'demo-rules' as const };
+    }
+
+    const payload = await response.json();
+    let polishedText = readOutputText(payload) || safeFallback;
+
+    for (const [placeholder, originalValue] of replacements) {
+      polishedText = polishedText.replaceAll(placeholder, originalValue);
+    }
+
+    return { text: polishedText, provider: 'openai' as const };
+  } catch {
+    return { text: fallback, provider: 'demo-rules' as const };
+  }
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const message = String(body.message || '').toLowerCase().trim();
-
-  if (!message) {
-    return NextResponse.json({ error: 'Mensagem obrigatória.' }, { status: 400 });
+  if (!checkRateLimit(request)) {
+    return NextResponse.json({ error: 'Muitas mensagens em sequência. Tente novamente em alguns minutos.' }, { status: 429 });
   }
 
-  if (includesAny(message, humanHandoffKeywords)) {
-    return NextResponse.json({
-      intent: 'human_handoff',
-      shouldSendAudio: false,
-      response: 'Vou chamar uma pessoa da equipe para te atender melhor nesse caso, tudo bem?'
-    });
-  }
+  try {
+    const body = (await request.json()) as {
+      message?: unknown;
+      context?: IntakeContext;
+    };
 
-  if (includesAny(message, orderKeywords)) {
+    const message = normalizeText(body.message);
+    const previousContext = sanitizeContext(body.context);
+
+    if (!message) {
+      return NextResponse.json({ error: 'Mensagem obrigatória.' }, { status: 400 });
+    }
+
+    if (message.length > 600) {
+      return NextResponse.json({ error: 'A mensagem deve ter no máximo 600 caracteres.' }, { status: 400 });
+    }
+
+    if (includesAny(message, humanHandoffKeywords)) {
+      return NextResponse.json({
+        intent: 'human_handoff',
+        shouldSendAudio: false,
+        provider: 'demo-rules',
+        progress: getProgress(previousContext),
+        context: { ...previousContext, awaiting: null },
+        response: 'Vou pausar a automação e encaminhar esta conversa para uma pessoa da equipe da JR Celular.'
+      });
+    }
+
+    if (includesAny(message, orderStatusKeywords)) {
+      return NextResponse.json({
+        intent: 'order_status',
+        shouldSendAudio: true,
+        provider: 'demo-rules',
+        progress: getProgress(previousContext),
+        context: { ...previousContext, awaiting: null },
+        response: 'Consigo consultar o andamento. Envie o número da OS ou o telefone usado no cadastro.'
+      });
+    }
+
+    const nextContext: IntakeContext = {
+      ...previousContext,
+      phone: previousContext.phone ?? normalizePhone(message),
+      customerName: previousContext.customerName ?? extractName(message, previousContext.awaiting),
+      deviceModel: previousContext.deviceModel ?? extractDevice(message, previousContext.awaiting),
+      issue: previousContext.issue ?? extractIssue(message, previousContext.awaiting)
+    };
+
+    const question = nextQuestion(nextContext);
+
+    if (question) {
+      nextContext.awaiting = question.awaiting;
+      const polished = await polishWithOpenAI(question.response, nextContext);
+
+      return NextResponse.json({
+        intent: 'intake',
+        shouldSendAudio: true,
+        provider: polished.provider,
+        progress: getProgress(nextContext),
+        context: nextContext,
+        response: polished.text
+      });
+    }
+
+    const completeContext = nextContext as Required<Pick<IntakeContext, 'customerName' | 'phone' | 'deviceModel' | 'issue'>>;
+    const serviceOrder = createOrder(completeContext);
+    const fallback = `Perfeito, ${completeContext.customerName}. A triagem foi concluída e a OS ${serviceOrder.number} foi criada para o ${completeContext.deviceModel}. A equipe agora pode revisar o caso e confirmar diagnóstico, prazo e orçamento.`;
+    const polished = await polishWithOpenAI(fallback, { ...nextContext, awaiting: null });
+
     return NextResponse.json({
-      intent: 'order_status',
+      intent: 'create_order',
       shouldSendAudio: true,
-      response: 'Consigo consultar para você. Me envie o número da OS ou o telefone cadastrado no atendimento.'
+      provider: polished.provider,
+      progress: 100,
+      context: { ...nextContext, awaiting: null },
+      serviceOrder,
+      response: polished.text
     });
+  } catch {
+    return NextResponse.json({ error: 'Não foi possível processar o atendimento agora.' }, { status: 500 });
   }
-
-  if (includesAny(message, quoteKeywords)) {
-    return NextResponse.json({
-      intent: 'quote_request',
-      shouldSendAudio: true,
-      response: 'Consigo te ajudar com uma estimativa. Me envie o modelo do aparelho, o defeito e, se possível, uma foto ou vídeo do problema.'
-    });
-  }
-
-  return NextResponse.json({
-    intent: 'general',
-    shouldSendAudio: true,
-    response: 'Olá! Sou o atendente virtual da assistência. Me diga o modelo do aparelho e o problema para eu direcionar seu atendimento.'
-  });
 }
