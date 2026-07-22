@@ -61,8 +61,7 @@ const initialMessage: Message = {
 
 const quickPrompts = [
   'Meu iPhone 13 caiu e a tela ficou preta',
-  'Meu Galaxy A54 não está carregando',
-  'Quero consultar o status da minha OS'
+  'Meu Galaxy A54 não está carregando'
 ];
 
 function createMessage(role: Message['role'], content: string): Message {
@@ -123,7 +122,7 @@ export default function AiChatPage() {
 
   async function sendMessage(content: string) {
     const trimmed = content.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || serviceOrder) return;
 
     const userMessage = createMessage('user', trimmed);
     const nextMessages = [...messages, userMessage];
@@ -153,7 +152,9 @@ export default function AiChatPage() {
       setContext(payload.context);
       setProgress(payload.progress);
       setProvider(payload.provider);
-      setServiceOrder(payload.serviceOrder);
+      if (payload.serviceOrder) {
+        setServiceOrder(payload.serviceOrder);
+      }
       setMessages((current) => [...current, createMessage('assistant', payload.response)]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Falha ao responder.');
@@ -265,9 +266,9 @@ export default function AiChatPage() {
               <input
                 value={message}
                 onChange={(event: ChangeEvent<HTMLInputElement>) => setMessage(event.target.value)}
-                disabled={isLoading}
+                disabled={isLoading || Boolean(serviceOrder)}
                 className="min-w-0 flex-1 rounded-2xl border border-line bg-app px-4 py-3 text-sm outline-none transition focus:border-brand focus:bg-white disabled:opacity-60"
-                placeholder="Digite como se fosse um cliente..."
+                placeholder={serviceOrder ? 'OS criada. Reinicie para uma nova simulação.' : 'Digite como se fosse um cliente...'}
                 aria-label="Mensagem para o assistente"
               />
               <Link
@@ -279,7 +280,7 @@ export default function AiChatPage() {
               </Link>
               <button
                 type="submit"
-                disabled={!message.trim() || isLoading}
+                disabled={!message.trim() || isLoading || Boolean(serviceOrder)}
                 aria-label="Enviar mensagem"
                 className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand text-white shadow-soft transition hover:bg-brandDark disabled:cursor-not-allowed disabled:opacity-50"
               >
