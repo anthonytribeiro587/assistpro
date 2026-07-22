@@ -26,7 +26,7 @@ function providedSecret(request: NextRequest, bodySecret?: unknown) {
 function webhookUrl(request: NextRequest) {
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const origin = configuredOrigin || request.nextUrl.origin;
-  const endpoint = new URL('/api/whatsapp/remote-triage', origin);
+  const endpoint = new URL('/api/whatsapp/orchestrator', origin);
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
   if (secret) endpoint.searchParams.set('secret', secret);
   return endpoint.toString();
@@ -76,25 +76,30 @@ export async function GET(request: NextRequest) {
       configured(process.env.EVOLUTION_INSTANCE) ||
       configured(process.env.EVOLUTION_INSTANCE_NAME),
     webhookSecret: configured(process.env.WHATSAPP_WEBHOOK_SECRET),
-    openAiApiKey: configured(process.env.OPENAI_API_KEY),
     supabaseUrl: configured(process.env.NEXT_PUBLIC_SUPABASE_URL),
-    supabaseServiceRole: configured(process.env.SUPABASE_SERVICE_ROLE_KEY)
+    supabaseServiceRole: configured(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    n8nWebhookUrl: configured(process.env.N8N_WEBHOOK_URL),
+    n8nWebhookSecret: configured(process.env.N8N_WEBHOOK_SECRET),
+    geminiApiKey: configured(process.env.GEMINI_API_KEY),
+    openAiApiKey: configured(process.env.OPENAI_API_KEY),
+    elevenLabsApiKey: configured(process.env.ELEVENLABS_API_KEY),
+    elevenLabsVoiceId: configured(process.env.ELEVENLABS_VOICE_ID)
   };
-  const requiredEnvironmentOk =
+
+  const coreReady =
     environment.evolutionApiUrl &&
     environment.evolutionApiKey &&
     environment.evolutionInstance &&
     environment.webhookSecret &&
     environment.supabaseUrl &&
-    environment.supabaseServiceRole;
+    environment.supabaseServiceRole &&
+    Boolean(evolution?.connected) &&
+    supabase.reachable &&
+    !webhookError;
 
   return NextResponse.json(
     {
-      ok:
-        requiredEnvironmentOk &&
-        Boolean(evolution?.connected) &&
-        supabase.reachable &&
-        !webhookError,
+      ok: coreReady,
       project: 'assistpro',
       environment,
       evolution,
@@ -106,11 +111,17 @@ export async function GET(request: NextRequest) {
         error: webhookError,
         setupMethod: 'GET com apply=1 ou POST protegido'
       },
-      trial: {
-        activationCommand: 'TESTE JR',
-        mode: 'pré-triagem remota',
+      capabilities: {
+        mode:
+          environment.n8nWebhookUrl && environment.n8nWebhookSecret
+            ? 'n8n-ai-orchestrator'
+            : 'safe-rules-fallback',
+        naturalLanguageAi: environment.geminiApiKey || environment.openAiApiKey,
+        incomingAudioTranscription: environment.openAiApiKey || environment.elevenLabsApiKey,
+        audioReply: environment.elevenLabsApiKey && environment.elevenLabsVoiceId,
         createsOrderBeforeDelivery: false
-      }
+      },
+      trial: { activationCommand: 'TESTE JR' }
     },
     { headers: { 'Cache-Control': 'no-store' } }
   );
