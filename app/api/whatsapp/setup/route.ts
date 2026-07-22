@@ -26,7 +26,7 @@ function providedSecret(request: NextRequest, bodySecret?: unknown) {
 function webhookUrl(request: NextRequest) {
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const origin = configuredOrigin || request.nextUrl.origin;
-  const endpoint = new URL('/api/whatsapp/webhook', origin);
+  const endpoint = new URL('/api/whatsapp/remote-triage', origin);
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
   if (secret) endpoint.searchParams.set('secret', secret);
   return endpoint.toString();
@@ -80,11 +80,18 @@ export async function GET(request: NextRequest) {
     supabaseUrl: configured(process.env.NEXT_PUBLIC_SUPABASE_URL),
     supabaseServiceRole: configured(process.env.SUPABASE_SERVICE_ROLE_KEY)
   };
+  const requiredEnvironmentOk =
+    environment.evolutionApiUrl &&
+    environment.evolutionApiKey &&
+    environment.evolutionInstance &&
+    environment.webhookSecret &&
+    environment.supabaseUrl &&
+    environment.supabaseServiceRole;
 
   return NextResponse.json(
     {
       ok:
-        Object.values(environment).every(Boolean) &&
+        requiredEnvironmentOk &&
         Boolean(evolution?.connected) &&
         supabase.reachable &&
         !webhookError,
@@ -99,7 +106,11 @@ export async function GET(request: NextRequest) {
         error: webhookError,
         setupMethod: 'GET com apply=1 ou POST protegido'
       },
-      trial: { activationCommand: 'TESTE JR' }
+      trial: {
+        activationCommand: 'TESTE JR',
+        mode: 'pré-triagem remota',
+        createsOrderBeforeDelivery: false
+      }
     },
     { headers: { 'Cache-Control': 'no-store' } }
   );
