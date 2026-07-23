@@ -5,10 +5,10 @@ import { OrderStatusUpdater } from '@/components/orders/order-status-updater';
 import { PageHeader } from '@/components/ui/page-header';
 import { loadServiceOrderEvents } from '@/lib/service-order-events';
 import {
-  loadServiceOrder,
   serviceOrderStatusLabels,
   serviceOrderStatuses
 } from '@/lib/service-order-data';
+import { loadServiceOrder } from '@/lib/service-order-server';
 
 export const dynamic = 'force-dynamic';
 
