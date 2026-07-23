@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { BarChart3, Home, MessageCircle, Settings, UsersRound, Wrench } from 'lucide-react';
+import { BarChart3, Columns3, Home, MessageCircle, Settings, UsersRound, Wrench } from 'lucide-react';
 
 export type ServiceOrderStatus =
   | 'received'
@@ -79,7 +79,10 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: 'Atendimento',
-    items: [{ label: 'WhatsApp', href: '/whatsapp', icon: MessageCircle }]
+    items: [
+      { label: 'Funil de clientes', href: '/pipeline', icon: Columns3 },
+      { label: 'WhatsApp', href: '/whatsapp', icon: MessageCircle }
+    ]
   },
   {
     label: 'Gestão',

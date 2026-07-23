@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     await supabase
       .from('whatsapp_conversations')
-      .update({ last_message_at: new Date().toISOString(), status: 'open' })
+      .update({ last_message_at: new Date().toISOString() })
       .eq('id', result.data.id)
       .eq('company_id', profile.companyId);
 
