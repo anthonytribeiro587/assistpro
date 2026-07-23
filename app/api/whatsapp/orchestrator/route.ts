@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  businessContextToAgentInput,
+  buildBusinessContext,
+  DEFAULT_AI_BUSINESS_SETTINGS,
+  loadAiBusinessSettings
+} from '@/lib/ai-business-settings';
+import { getAssistProCompanyId } from '@/lib/company';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -250,6 +258,21 @@ async function readMakeResponse(response: Response) {
   }
 }
 
+async function loadBusinessContext() {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return buildBusinessContext(DEFAULT_AI_BUSINESS_SETTINGS);
+
+  try {
+    const companyId = await getAssistProCompanyId(supabase);
+    const result = await loadAiBusinessSettings(supabase, companyId);
+    return buildBusinessContext(result.settings);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Falha ao carregar contexto da empresa.';
+    console.error('AssistPro business context error', message);
+    return buildBusinessContext(DEFAULT_AI_BUSINESS_SETTINGS);
+  }
+}
+
 async function forwardToMake(
   request: NextRequest,
   inbound: NormalizedInboundMessage,
@@ -257,6 +280,9 @@ async function forwardToMake(
 ) {
   const apiKey = process.env.MAKE_WEBHOOK_API_KEY?.trim();
   if (!apiKey) throw new Error('MAKE_WEBHOOK_API_KEY não está configurada.');
+
+  const businessContext = await loadBusinessContext();
+  const agentInput = businessContextToAgentInput(inbound.messageText, businessContext);
 
   const response = await fetch(makeUrl, {
     method: 'POST',
@@ -268,7 +294,9 @@ async function forwardToMake(
       source: 'assistpro',
       receivedAt: new Date().toISOString(),
       callbackUrl: new URL('/api/make/respond', request.nextUrl.origin).toString(),
-      ...inbound
+      ...inbound,
+      businessContext,
+      agentInput
     }),
     cache: 'no-store',
     signal: AbortSignal.timeout(30_000)
@@ -318,6 +346,7 @@ export async function GET() {
     callbackConfigured: Boolean(process.env.MAKE_CALLBACK_SECRET),
     inputNormalization: true,
     forwardsOnlyInboundMessages: true,
+    businessContextConfigured: Boolean(getSupabaseAdmin()),
     audioConfigured: Boolean(
       process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID
     )
