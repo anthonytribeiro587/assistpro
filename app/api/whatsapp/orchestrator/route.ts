@@ -7,10 +7,11 @@ import {
 } from '@/lib/ai-business-settings';
 import { getAssistProCompanyId } from '@/lib/company';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { getAuthenticatedProfile } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
- type NormalizedInboundMessage = {
+type NormalizedInboundMessage = {
   event: 'messages.upsert';
   phone: string;
   conversationId: string;
@@ -92,7 +93,10 @@ function normalizedTimestamp(value: unknown) {
   return new Date(milliseconds).toISOString();
 }
 
-function extractIncomingMessage(payload: any): { message?: NormalizedInboundMessage; ignoredReason?: string } {
+function extractIncomingMessage(payload: any): {
+  message?: NormalizedInboundMessage;
+  ignoredReason?: string;
+} {
   const eventName = normalizeEventName(payload?.event || payload?.type);
   if (eventName !== 'messages_upsert' && eventName !== 'message_upsert') {
     return { ignoredReason: eventName || 'event_not_supported' };
@@ -112,7 +116,9 @@ function extractIncomingMessage(payload: any): { message?: NormalizedInboundMess
       remoteJid.includes('@broadcast') ||
       remoteJid.includes('@newsletter') ||
       remoteJid === 'status@broadcast'
-    ) continue;
+    ) {
+      continue;
+    }
 
     const message = source?.message || item?.message || {};
     const messageText = extractMessageText(message);
@@ -134,7 +140,9 @@ function extractIncomingMessage(payload: any): { message?: NormalizedInboundMess
         messageText,
         messageType: detectMessageType(source, message),
         providerMessageId: compactText(key?.id || source?.id || item?.id) || null,
-        createdAt: normalizedTimestamp(source?.messageTimestamp || source?.timestamp || payload?.date_time)
+        createdAt: normalizedTimestamp(
+          source?.messageTimestamp || source?.timestamp || payload?.date_time
+        )
       }
     };
   }
@@ -158,15 +166,20 @@ async function persistInbound(inbound: NormalizedInboundMessage) {
   if (!customerId) {
     const created = await supabase
       .from('customers')
-      .insert({
-        company_id: companyId,
-        phone: inbound.phone,
-        name: inbound.pushName || `Cliente ${inbound.phone.slice(-4)}`,
-        notes: 'Contato criado automaticamente pelo WhatsApp.'
-      })
+      .upsert(
+        {
+          company_id: companyId,
+          phone: inbound.phone,
+          name: inbound.pushName || `Cliente ${inbound.phone.slice(-4)}`,
+          notes: 'Contato criado automaticamente pelo WhatsApp.'
+        },
+        { onConflict: 'company_id,phone', ignoreDuplicates: false }
+      )
       .select('id')
       .single();
-    if (created.error || !created.data?.id) throw new Error(created.error?.message || 'Falha ao criar cliente.');
+    if (created.error || !created.data?.id) {
+      throw new Error(created.error?.message || 'Falha ao criar cliente.');
+    }
     customerId = created.data.id;
   }
 
@@ -186,7 +199,9 @@ async function persistInbound(inbound: NormalizedInboundMessage) {
       .insert({ company_id: companyId, customer_id: customerId, phone: inbound.phone, status: 'open' })
       .select('id')
       .single();
-    if (created.error || !created.data?.id) throw new Error(created.error?.message || 'Falha ao criar conversa.');
+    if (created.error || !created.data?.id) {
+      throw new Error(created.error?.message || 'Falha ao criar conversa.');
+    }
     conversationId = created.data.id;
   }
 
@@ -242,7 +257,11 @@ async function loadBusinessContext() {
   }
 }
 
-async function forwardToMake(request: NextRequest, inbound: NormalizedInboundMessage, makeUrl: URL) {
+async function forwardToMake(
+  request: NextRequest,
+  inbound: NormalizedInboundMessage,
+  makeUrl: URL
+) {
   const apiKey = process.env.MAKE_WEBHOOK_API_KEY?.trim();
   if (!apiKey) throw new Error('MAKE_WEBHOOK_API_KEY não está configurada.');
 
@@ -265,18 +284,30 @@ async function forwardToMake(request: NextRequest, inbound: NormalizedInboundMes
 
   const text = await response.text();
   let result: unknown = text;
-  try { result = text ? JSON.parse(text) : null; } catch { /* resposta textual do Make */ }
+  try {
+    result = text ? JSON.parse(text) : null;
+  } catch {
+    // O Make pode retornar texto simples.
+  }
+
   if (!response.ok) {
-    const detail = typeof result === 'object' && result ? (result as any).message || (result as any).error : result;
+    const detail =
+      typeof result === 'object' && result
+        ? (result as { message?: unknown; error?: unknown }).message ||
+          (result as { message?: unknown; error?: unknown }).error
+        : result;
     throw new Error(String(detail || `Make respondeu HTTP ${response.status}.`));
   }
+
   return NextResponse.json({ ok: true, mode: 'make', result });
 }
 
 async function forwardToSafeFallback(request: NextRequest, payload: unknown) {
-  const endpoint = new URL('/api/whatsapp/remote-triage', request.nextUrl.origin);
   const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-  if (secret) endpoint.searchParams.set('secret', secret);
+  if (!secret) throw new Error('WHATSAPP_WEBHOOK_SECRET não está configurado.');
+
+  const endpoint = new URL('/api/whatsapp/remote-triage', request.nextUrl.origin);
+  endpoint.searchParams.set('secret', secret);
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -289,6 +320,11 @@ async function forwardToSafeFallback(request: NextRequest, payload: unknown) {
 }
 
 export async function GET() {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
+    return NextResponse.json({ ok: false, error: 'Sessão administrativa necessária.' }, { status: 401 });
+  }
+
   return NextResponse.json({
     ok: true,
     service: 'AssistPro WhatsApp orchestrator',
@@ -305,7 +341,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const expectedSecret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-  if (expectedSecret && providedSecret(request) !== expectedSecret) {
+  if (!expectedSecret) {
+    return NextResponse.json(
+      { ok: false, error: 'Webhook bloqueado: WHATSAPP_WEBHOOK_SECRET não configurado.' },
+      { status: 503 }
+    );
+  }
+  if (providedSecret(request) !== expectedSecret) {
     return NextResponse.json({ ok: false, error: 'Webhook não autorizado.' }, { status: 401 });
   }
 
@@ -316,7 +358,12 @@ export async function POST(request: NextRequest) {
 
     const normalized = extractIncomingMessage(payload);
     if (!normalized.message) {
-      return NextResponse.json({ ok: true, mode: 'make', ignored: true, reason: normalized.ignoredReason || 'event_ignored' });
+      return NextResponse.json({
+        ok: true,
+        mode: 'make',
+        ignored: true,
+        reason: normalized.ignoredReason || 'event_ignored'
+      });
     }
 
     const persistence = await persistInbound(normalized.message);
