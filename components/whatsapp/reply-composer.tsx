@@ -34,8 +34,10 @@ export function ReplyComposer({ conversationId }: { conversationId: string }) {
   }
 
   return (
-    <div className="border-t border-slate-200 bg-white p-3 sm:p-4">
-      {error ? <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p> : null}
+    <div className="border-t border-slate-200 bg-white p-2.5">
+      {error ? (
+        <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>
+      ) : null}
       <form onSubmit={submit} className="flex items-end gap-2">
         <textarea
           value={text}
@@ -43,18 +45,17 @@ export function ReplyComposer({ conversationId }: { conversationId: string }) {
           rows={1}
           maxLength={3000}
           placeholder="Responder como atendente..."
-          className="max-h-32 min-h-11 min-w-0 flex-1 resize-y rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-500 focus:bg-white focus:ring-4 focus:ring-violet-100"
+          className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-500 focus:bg-white focus:ring-2 focus:ring-violet-100"
         />
         <button
           type="submit"
           disabled={!text.trim() || pending}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-violet-600 text-white shadow-md shadow-violet-200 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Enviar resposta"
         >
-          {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </form>
-      <p className="mt-2 text-[11px] text-slate-400">A resposta será enviada pela instância Evolution conectada e salva no histórico.</p>
     </div>
   );
 }
