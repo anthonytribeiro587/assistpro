@@ -1,42 +1,37 @@
-import { Phone, Plus, Search, UserRound } from 'lucide-react';
+import Link from 'next/link';
+import { Plus } from 'lucide-react';
+import { CustomerTable } from '@/components/customers/customer-table';
 import { PageHeader } from '@/components/ui/page-header';
-import { customers } from '@/lib/app-data';
+import { loadCustomerDirectory } from '@/lib/customer-directory';
 
-export default function CustomersPage() {
+export const dynamic = 'force-dynamic';
+
+export default async function CustomersPage() {
+  const directory = await loadCustomerDirectory();
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <PageHeader
-        eyebrow="Cadastro"
+        eyebrow="Operação"
         title="Clientes"
-        description="Base de clientes vinculada às OS, conversas do WhatsApp e histórico de aparelhos."
-        action={<button className="inline-flex items-center gap-2 rounded-2xl bg-brand px-5 py-3 text-sm font-black text-white shadow-glow"><Plus className="h-4 w-4" /> Novo cliente</button>}
+        description="Consulte contatos, histórico de OS e etapa atual do atendimento em uma única tabela."
+        action={
+          <Link
+            href="/ordens/nova"
+            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700"
+          >
+            <Plus className="h-4 w-4" /> Nova OS
+          </Link>
+        }
       />
 
-      <section className="rounded-[1.75rem] border border-line bg-white p-4 shadow-card">
-        <div className="flex items-center gap-2 rounded-2xl border border-line bg-app px-4 py-3 text-muted">
-          <Search className="h-4 w-4" />
-          <input className="w-full bg-transparent text-sm outline-none" placeholder="Buscar cliente por nome ou telefone" />
+      {directory.error ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+          {directory.error}
         </div>
-      </section>
+      ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {customers.map((customer) => (
-          <article key={customer.phone} className="rounded-[1.5rem] border border-line bg-white p-5 shadow-card">
-            <div className="flex items-start gap-3">
-              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brandLight text-brand"><UserRound className="h-5 w-5" /></span>
-              <div className="min-w-0 flex-1">
-                <h2 className="font-black text-ink">{customer.name}</h2>
-                <p className="mt-1 flex items-center gap-1 text-sm text-muted"><Phone className="h-4 w-4" /> {customer.phone}</p>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-app p-3"><span className="text-muted">OS</span><strong className="block text-ink">{customer.orders}</strong></div>
-                  <div className="rounded-2xl bg-app p-3"><span className="text-muted">Último</span><strong className="block truncate text-ink">{customer.lastOrder}</strong></div>
-                </div>
-                <span className="mt-4 inline-flex rounded-full bg-brandLight px-3 py-1 text-xs font-bold text-brand">{customer.status}</span>
-              </div>
-            </div>
-          </article>
-        ))}
-      </section>
+      <CustomerTable rows={directory.rows} />
     </div>
   );
 }
