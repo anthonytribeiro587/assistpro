@@ -12,8 +12,7 @@ const PUBLIC_API_PREFIXES = [
   '/api/make/',
   '/api/whatsapp/orchestrator',
   '/api/whatsapp/webhook',
-  '/api/whatsapp/remote-triage',
-  '/api/whatsapp/setup'
+  '/api/whatsapp/remote-triage'
 ];
 
 function isPublicPath(pathname: string) {
@@ -26,10 +25,24 @@ function isPublicApi(pathname: string) {
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const { pathname } = request.nextUrl;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
-  if (!supabaseUrl || !supabaseAnonKey) return response;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    if (isPublicPath(pathname) || isPublicApi(pathname)) return response;
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { ok: false, error: 'Autenticação do CRM não configurada.' },
+        { status: 503 }
+      );
+    }
+
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = '/login';
+    loginUrl.search = 'error=configuration';
+    return NextResponse.redirect(loginUrl);
+  }
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -47,7 +60,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user }
   } = await supabase.auth.getUser();
-  const { pathname } = request.nextUrl;
 
   if (pathname.startsWith('/api/') && !isPublicApi(pathname) && !user) {
     return NextResponse.json({ ok: false, error: 'Sessão não autenticada.' }, { status: 401 });
