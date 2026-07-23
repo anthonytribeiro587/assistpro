@@ -99,6 +99,7 @@ export function pipelineStageMeta(value?: string | null) {
 
 export function advancePipelineStage(current: string | null | undefined, proposed: PipelineStage) {
   const normalizedCurrent = normalizePipelineStage(current);
+  if (normalizedCurrent === 'concluido' && proposed !== 'contato_iniciado') return proposed;
   return stageRank[proposed] > stageRank[normalizedCurrent] ? proposed : normalizedCurrent;
 }
 
