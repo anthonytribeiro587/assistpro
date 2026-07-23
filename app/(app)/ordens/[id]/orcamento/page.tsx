@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft, CircleDollarSign, MessageCircle, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { formatMoney } from '@/lib/format';
-import { loadServiceOrder, serviceOrderStatusLabels } from '@/lib/service-order-data';
+import { serviceOrderStatusLabels } from '@/lib/service-order-data';
+import { loadServiceOrder } from '@/lib/service-order-server';
 
 export const dynamic = 'force-dynamic';
 
