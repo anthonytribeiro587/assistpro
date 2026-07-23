@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { ServiceOrderCreateForm } from '@/components/orders/service-order-create-form';
 import { PageHeader } from '@/components/ui/page-header';
-import { loadServiceOrderOptions } from '@/lib/service-order-data';
+import { loadServiceOrderOptions } from '@/lib/service-order-server';
 
 export const dynamic = 'force-dynamic';
 
