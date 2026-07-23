@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { advancePipelineStage, deriveOutboundPipelineStage } from '@/lib/pipeline';
 import { getAuthenticatedProfile, hasAnyRole } from '@/lib/supabase-server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { sendEvolutionText } from '@/lib/evolution';
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await supabase
       .from('whatsapp_conversations')
-      .select('id,phone')
+      .select('id,phone,status')
       .eq('id', parsed.data.conversationId)
       .eq('company_id', profile.companyId)
       .maybeSingle();
@@ -83,13 +84,18 @@ export async function POST(request: NextRequest) {
 
     if (saved.error) throw new Error(saved.error.message);
 
+    const proposedStage = deriveOutboundPipelineStage({ text: parsed.data.text });
+    const nextStatus = proposedStage
+      ? advancePipelineStage(String(result.data.status || ''), proposedStage)
+      : String(result.data.status || 'contato_iniciado');
+
     await supabase
       .from('whatsapp_conversations')
-      .update({ last_message_at: new Date().toISOString() })
+      .update({ last_message_at: new Date().toISOString(), status: nextStatus })
       .eq('id', result.data.id)
       .eq('company_id', profile.companyId);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, pipelineStage: nextStatus });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : 'Não foi possível enviar.' },

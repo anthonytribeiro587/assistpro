@@ -9,9 +9,10 @@ import {
 } from 'lucide-react';
 import { ConversationList } from '@/components/whatsapp/conversation-list';
 import { InboxRefresh } from '@/components/whatsapp/inbox-refresh';
+import { MessageThread } from '@/components/whatsapp/message-thread';
+import { PipelineStageSelect } from '@/components/whatsapp/pipeline-stage-select';
 import { ReplyComposer } from '@/components/whatsapp/reply-composer';
 import { loadWhatsappInbox, type InboxMessage } from '@/lib/whatsapp-inbox';
-import { pipelineStageLabel } from '@/lib/pipeline';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,9 @@ export default async function WhatsappPage({
   const inbox = await loadWhatsappInbox();
   const selected =
     inbox.conversations.find((item) => item.id === params.conversation) || inbox.conversations[0] || null;
+  const messageKey = selected
+    ? `${selected.id}:${selected.messages.at(-1)?.id || selected.lastMessageAt}`
+    : 'empty';
 
   return (
     <div className="flex h-[calc(100dvh-6.5rem)] min-h-[600px] flex-col gap-3">
@@ -132,12 +136,13 @@ export default async function WhatsappPage({
                   <div className="min-w-0">
                     <strong className="block truncate text-sm text-slate-950">{selected.customerName}</strong>
                     <p className="truncate text-[10px] text-slate-500">
-                      {formatPhone(selected.phone)} • {pipelineStageLabel(selected.status)} • {dateLabel(selected.lastMessageAt)}
+                      {formatPhone(selected.phone)} • atualizado {dateLabel(selected.lastMessageAt)}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700 sm:inline-flex">
+                  <PipelineStageSelect conversationId={selected.id} initialStage={selected.status} />
+                  <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700 2xl:inline-flex">
                     <ShieldCheck className="h-3 w-3" /> Histórico salvo
                   </span>
                   <a
@@ -150,7 +155,7 @@ export default async function WhatsappPage({
                 </div>
               </header>
 
-              <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3 sm:p-4">
+              <MessageThread messageKey={messageKey}>
                 {selected.messages.length ? (
                   selected.messages.map((message) => <MessageBubble key={message.id} message={message} />)
                 ) : (
@@ -158,7 +163,7 @@ export default async function WhatsappPage({
                     Ainda não há mensagens salvas nesta conversa.
                   </p>
                 )}
-              </div>
+              </MessageThread>
 
               <ReplyComposer conversationId={selected.id} />
             </>

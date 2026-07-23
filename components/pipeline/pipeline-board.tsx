@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { DragEvent, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, ArrowRight, Loader2, MessageCircle, Search } from 'lucide-react';
+import { AlertCircle, ArrowRight, GripVertical, Loader2, MessageCircle, Search } from 'lucide-react';
 import type { InboxConversation } from '@/lib/whatsapp-inbox';
 import {
   normalizePipelineStage,
@@ -40,6 +40,8 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
   );
   const [query, setQuery] = useState('');
   const [savingId, setSavingId] = useState('');
+  const [draggedId, setDraggedId] = useState('');
+  const [dragOverStage, setDragOverStage] = useState<PipelineStage | null>(null);
   const [error, setError] = useState('');
 
   const filtered = useMemo(() => {
@@ -53,11 +55,14 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
   }, [items, query]);
 
   async function moveConversation(conversationId: string, stage: PipelineStage) {
+    const current = items.find((item) => item.id === conversationId);
+    if (!current || current.stage === stage || savingId) return;
+
     const previous = items;
     setError('');
     setSavingId(conversationId);
-    setItems((current) =>
-      current.map((item) => (item.id === conversationId ? { ...item, stage, status: stage } : item))
+    setItems((list) =>
+      list.map((item) => (item.id === conversationId ? { ...item, stage, status: stage } : item))
     );
 
     try {
@@ -73,7 +78,27 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
       setError(requestError instanceof Error ? requestError.message : 'Falha ao atualizar o funil.');
     } finally {
       setSavingId('');
+      setDraggedId('');
+      setDragOverStage(null);
     }
+  }
+
+  function beginDrag(event: DragEvent<HTMLElement>, conversationId: string) {
+    setDraggedId(conversationId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', conversationId);
+  }
+
+  function allowDrop(event: DragEvent<HTMLElement>, stage: PipelineStage) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverStage(stage);
+  }
+
+  function drop(event: DragEvent<HTMLElement>, stage: PipelineStage) {
+    event.preventDefault();
+    const conversationId = event.dataTransfer.getData('text/plain') || draggedId;
+    if (conversationId) void moveConversation(conversationId, stage);
   }
 
   return (
@@ -90,7 +115,7 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
         </div>
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
           <span className="rounded-full bg-slate-100 px-3 py-1.5">{filtered.length} atendimentos</span>
-          <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">Atualização manual por etapa</span>
+          <span className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-700">Arraste os cartões entre as etapas</span>
         </div>
       </div>
 
@@ -104,27 +129,54 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
         <div className="grid min-w-[1540px] grid-cols-7 gap-3">
           {pipelineStages.map((stage) => {
             const stageItems = filtered.filter((item) => item.stage === stage.id);
+            const highlighted = dragOverStage === stage.id && Boolean(draggedId);
+
             return (
-              <section key={stage.id} className="flex min-h-[520px] flex-col rounded-2xl border border-slate-200 bg-slate-100/80">
-                <header className="border-b border-slate-200 px-3 py-3">
+              <section
+                key={stage.id}
+                onDragOver={(event) => allowDrop(event, stage.id)}
+                onDragLeave={() => setDragOverStage((current) => (current === stage.id ? null : current))}
+                onDrop={(event) => drop(event, stage.id)}
+                className={`flex min-h-[520px] flex-col rounded-2xl border transition ${stage.columnClass} ${
+                  highlighted ? 'ring-2 ring-violet-400 ring-offset-2' : ''
+                }`}
+              >
+                <header className={`rounded-t-2xl border-b border-black/5 px-3 py-3 ${stage.headerClass}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-extrabold text-slate-900">{stage.shortLabel}</h2>
-                    <span className="grid h-6 min-w-6 place-items-center rounded-full bg-white px-1.5 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">
+                    <h2 className="text-sm font-extrabold">{stage.shortLabel}</h2>
+                    <span className="grid h-6 min-w-6 place-items-center rounded-full bg-white/80 px-1.5 text-[11px] font-black text-slate-700 ring-1 ring-black/5">
                       {stageItems.length}
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">{stage.description}</p>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-75">{stage.description}</p>
                 </header>
 
                 <div className="flex-1 space-y-2 p-2.5">
                   {stageItems.map((conversation) => (
-                    <article key={conversation.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <article
+                      key={conversation.id}
+                      draggable={savingId !== conversation.id}
+                      onDragStart={(event) => beginDrag(event, conversation.id)}
+                      onDragEnd={() => {
+                        setDraggedId('');
+                        setDragOverStage(null);
+                      }}
+                      className={`rounded-xl border border-white/70 bg-white p-3 shadow-sm transition ${
+                        draggedId === conversation.id ? 'scale-[.98] opacity-50' : 'hover:-translate-y-0.5 hover:shadow-md'
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <strong className="block truncate text-sm text-slate-950">{conversation.customerName}</strong>
                           <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{formatPhone(conversation.phone)}</span>
                         </div>
-                        {savingId === conversation.id ? <Loader2 className="h-4 w-4 animate-spin text-violet-600" /> : null}
+                        <div className="flex items-center gap-1 text-slate-400">
+                          {savingId === conversation.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-violet-600" />
+                          ) : (
+                            <GripVertical className="h-4 w-4 cursor-grab" aria-label="Arrastar atendimento" />
+                          )}
+                        </div>
                       </div>
 
                       <p className="mt-2 line-clamp-3 min-h-12 text-xs leading-4 text-slate-600">
@@ -136,19 +188,17 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
                         {conversation.humanTakeover ? <span className="font-bold text-amber-700">Humano</span> : null}
                       </div>
 
-                      <label className="mt-3 block">
-                        <span className="sr-only">Alterar etapa</span>
-                        <select
-                          value={conversation.stage}
-                          disabled={savingId === conversation.id}
-                          onChange={(event) => void moveConversation(conversation.id, event.target.value as PipelineStage)}
-                          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold text-slate-700 outline-none focus:border-violet-400"
-                        >
-                          {pipelineStages.map((option) => (
-                            <option key={option.id} value={option.id}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
+                      <select
+                        value={conversation.stage}
+                        disabled={savingId === conversation.id}
+                        onChange={(event) => void moveConversation(conversation.id, event.target.value as PipelineStage)}
+                        className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold text-slate-700 outline-none focus:border-violet-400"
+                        aria-label="Alterar etapa"
+                      >
+                        {pipelineStages.map((option) => (
+                          <option key={option.id} value={option.id}>{option.label}</option>
+                        ))}
+                      </select>
 
                       <Link
                         href={`/whatsapp?conversation=${conversation.id}`}
@@ -161,8 +211,10 @@ export function PipelineBoard({ conversations }: { conversations: InboxConversat
                   ))}
 
                   {!stageItems.length ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 p-4 text-center text-xs text-slate-400">
-                      Nenhum atendimento nesta etapa.
+                    <div className={`rounded-xl border border-dashed p-4 text-center text-xs ${
+                      highlighted ? 'border-violet-400 bg-violet-50 text-violet-700' : 'border-slate-300 bg-white/60 text-slate-400'
+                    }`}>
+                      {highlighted ? 'Solte o atendimento aqui.' : 'Nenhum atendimento nesta etapa.'}
                     </div>
                   ) : null}
                 </div>
