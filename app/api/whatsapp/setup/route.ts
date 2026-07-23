@@ -5,6 +5,7 @@ import {
   getEvolutionConfig
 } from '@/lib/evolution';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { getAuthenticatedProfile, hasAnyRole } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,23 +13,14 @@ function configured(value?: string) {
   return Boolean(String(value || '').trim());
 }
 
-function providedSecret(request: NextRequest, bodySecret?: unknown) {
-  return (
-    String(bodySecret || '').trim() ||
-    request.nextUrl.searchParams.get('secret') ||
-    request.headers.get('x-assistpro-webhook-secret') ||
-    request.headers.get('x-webhook-secret') ||
-    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
-    ''
-  );
-}
-
 function webhookUrl(request: NextRequest) {
+  const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
+  if (!secret) throw new Error('WHATSAPP_WEBHOOK_SECRET não está configurado.');
+
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const origin = configuredOrigin || request.nextUrl.origin;
   const endpoint = new URL('/api/whatsapp/orchestrator', origin);
-  const secret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-  if (secret) endpoint.searchParams.set('secret', secret);
+  endpoint.searchParams.set('secret', secret);
   return endpoint.toString();
 }
 
@@ -45,19 +37,32 @@ async function inspectSupabase() {
   };
 }
 
-export async function GET(request: NextRequest) {
-  let webhookConfigured = false;
-  let webhookError: string | null = null;
-
-  if (request.nextUrl.searchParams.get('apply') === '1') {
-    try {
-      await configureEvolutionWebhook(webhookUrl(request));
-      webhookConfigured = true;
-    } catch (error) {
-      webhookError = error instanceof Error ? error.message : 'Não foi possível configurar o webhook.';
-    }
+async function requireAdmin() {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
+    return {
+      profile: null,
+      response: NextResponse.json(
+        { ok: false, error: 'Seu usuário ainda não possui perfil na empresa.' },
+        { status: 403 }
+      )
+    };
   }
 
+  if (!hasAnyRole(profile, ['owner', 'admin'])) {
+    return {
+      profile,
+      response: NextResponse.json(
+        { ok: false, error: 'Apenas proprietário ou administrador pode configurar o WhatsApp.' },
+        { status: 403 }
+      )
+    };
+  }
+
+  return { profile, response: null };
+}
+
+async function diagnostics(request: NextRequest, webhookConfigured = false, webhookError: string | null = null) {
   let evolution: Awaited<ReturnType<typeof getEvolutionConnectionState>> | null = null;
   let evolutionError: string | null = null;
 
@@ -81,8 +86,6 @@ export async function GET(request: NextRequest) {
     makeWebhookUrl: configured(process.env.MAKE_WEBHOOK_URL),
     makeWebhookApiKey: configured(process.env.MAKE_WEBHOOK_API_KEY),
     makeCallbackSecret: configured(process.env.MAKE_CALLBACK_SECRET),
-    geminiApiKey: configured(process.env.GEMINI_API_KEY),
-    openAiApiKey: configured(process.env.OPENAI_API_KEY),
     elevenLabsApiKey: configured(process.env.ELEVENLABS_API_KEY),
     elevenLabsVoiceId: configured(process.env.ELEVENLABS_VOICE_ID)
   };
@@ -98,63 +101,73 @@ export async function GET(request: NextRequest) {
     supabase.reachable &&
     !webhookError;
 
-  return NextResponse.json(
-    {
-      ok: coreReady,
-      project: 'assistpro',
-      environment,
-      evolution,
-      evolutionError,
-      supabase,
-      webhook: {
-        endpoint: webhookUrl(request).replace(/\?secret=.*/, '?secret=***'),
-        configuredByThisRequest: webhookConfigured,
-        error: webhookError,
-        setupMethod: 'GET com apply=1 ou POST protegido'
-      },
-      capabilities: {
-        mode:
-          environment.makeWebhookUrl && environment.makeWebhookApiKey
-            ? 'make-ai-orchestrator'
-            : 'safe-rules-fallback',
-        callbackReady: environment.makeCallbackSecret,
-        naturalLanguageAi: environment.geminiApiKey || environment.openAiApiKey,
-        incomingAudioTranscription: environment.openAiApiKey || environment.elevenLabsApiKey,
-        audioReply: environment.elevenLabsApiKey && environment.elevenLabsVoiceId,
-        createsOrderBeforeDelivery: false
-      },
-      trial: { activationCommand: 'TESTE JR' }
+  let endpoint = '/api/whatsapp/orchestrator?secret=***';
+  try {
+    endpoint = webhookUrl(request).replace(/\?secret=.*/, '?secret=***');
+  } catch {
+    // A ausência do segredo já aparece no diagnóstico.
+  }
+
+  return {
+    ok: coreReady,
+    project: 'assistpro',
+    environment,
+    evolution,
+    evolutionError,
+    supabase,
+    webhook: {
+      endpoint,
+      configuredByThisRequest: webhookConfigured,
+      error: webhookError
     },
-    { headers: { 'Cache-Control': 'no-store' } }
+    capabilities: {
+      mode:
+        environment.makeWebhookUrl && environment.makeWebhookApiKey
+          ? 'make-ai-orchestrator'
+          : 'safe-rules-fallback',
+      callbackReady: environment.makeCallbackSecret,
+      audioReply: environment.elevenLabsApiKey && environment.elevenLabsVoiceId,
+      createsOrderBeforeDelivery: false
+    }
+  };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (auth.response) return auth.response;
+
+  let webhookConfigured = false;
+  let webhookError: string | null = null;
+
+  if (request.nextUrl.searchParams.get('apply') === '1') {
+    try {
+      await configureEvolutionWebhook(webhookUrl(request));
+      webhookConfigured = true;
+    } catch (error) {
+      webhookError = error instanceof Error ? error.message : 'Não foi possível configurar o webhook.';
+    }
+  }
+
+  return NextResponse.json(
+    await diagnostics(request, webhookConfigured, webhookError),
+    { headers: { 'Cache-Control': 'no-store, max-age=0' } }
   );
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({}));
-  const expectedSecret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
-
-  if (!expectedSecret) {
-    return NextResponse.json(
-      { ok: false, error: 'WHATSAPP_WEBHOOK_SECRET não está configurado no AssistPro.' },
-      { status: 503 }
-    );
-  }
-
-  if (providedSecret(request, body?.secret) !== expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'Não autorizado.' }, { status: 401 });
-  }
+  const auth = await requireAdmin();
+  if (auth.response) return auth.response;
 
   try {
     const endpoint = webhookUrl(request);
     await configureEvolutionWebhook(endpoint);
-    const evolution = await getEvolutionConnectionState();
-
-    return NextResponse.json({
-      ok: evolution.connected,
-      webhookConfigured: true,
-      endpoint: endpoint.replace(/\?secret=.*/, '?secret=***'),
-      evolution
-    });
+    return NextResponse.json(
+      {
+        ...(await diagnostics(request, true, null)),
+        message: 'Webhook da Evolution configurado com segurança.'
+      },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+    );
   } catch (error) {
     return NextResponse.json(
       {
