@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { ServiceOrdersTable } from '@/components/orders/service-orders-table';
 import { PageHeader } from '@/components/ui/page-header';
-import { loadServiceOrderOptions, loadServiceOrders } from '@/lib/service-order-data';
+import { loadServiceOrderOptions, loadServiceOrders } from '@/lib/service-order-server';
 
 export const dynamic = 'force-dynamic';
 
