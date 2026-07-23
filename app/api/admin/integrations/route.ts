@@ -27,6 +27,31 @@ function buildWebhookUrl(request: NextRequest) {
   return endpoint.toString();
 }
 
+async function requireAdministrator() {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
+    return {
+      profile: null,
+      response: NextResponse.json(
+        { ok: false, error: 'Seu usuário ainda não possui perfil na empresa.' },
+        { status: 403 }
+      )
+    };
+  }
+
+  if (!hasAnyRole(profile, ['owner', 'admin'])) {
+    return {
+      profile,
+      response: NextResponse.json(
+        { ok: false, error: 'Apenas proprietário ou administrador pode acessar integrações.' },
+        { status: 403 }
+      )
+    };
+  }
+
+  return { profile, response: null };
+}
+
 async function integrationSnapshot(profileRole: string) {
   let evolution: {
     configured: boolean;
@@ -54,14 +79,13 @@ async function integrationSnapshot(profileRole: string) {
   }
 
   const environment = deploymentEnvironment();
-  const canManage = profileRole === 'owner' || profileRole === 'admin';
 
   return {
     ok: true,
     role: profileRole,
     environment,
-    canManage,
-    canConfigureWebhook: canManage && environment === 'production',
+    canManage: true,
+    canConfigureWebhook: environment === 'production',
     evolution,
     make: {
       webhookConfigured: configured(process.env.MAKE_WEBHOOK_URL),
@@ -88,35 +112,18 @@ async function integrationSnapshot(profileRole: string) {
 }
 
 export async function GET() {
-  const profile = await getAuthenticatedProfile();
-  if (!profile) {
-    return NextResponse.json(
-      { ok: false, error: 'Seu usuário ainda não possui perfil na empresa.' },
-      { status: 403 }
-    );
-  }
+  const auth = await requireAdministrator();
+  if (auth.response || !auth.profile) return auth.response;
 
-  const snapshot = await integrationSnapshot(profile.role);
+  const snapshot = await integrationSnapshot(auth.profile.role);
   return NextResponse.json(snapshot, {
     headers: { 'Cache-Control': 'no-store, max-age=0' }
   });
 }
 
 export async function POST(request: NextRequest) {
-  const profile = await getAuthenticatedProfile();
-  if (!profile) {
-    return NextResponse.json(
-      { ok: false, error: 'Seu usuário ainda não possui perfil na empresa.' },
-      { status: 403 }
-    );
-  }
-
-  if (!hasAnyRole(profile, ['owner', 'admin'])) {
-    return NextResponse.json(
-      { ok: false, error: 'Apenas proprietário ou administrador pode alterar integrações.' },
-      { status: 403 }
-    );
-  }
+  const auth = await requireAdministrator();
+  if (auth.response || !auth.profile) return auth.response;
 
   if (deploymentEnvironment() !== 'production') {
     return NextResponse.json(
@@ -136,7 +143,7 @@ export async function POST(request: NextRequest) {
   try {
     const webhookUrl = buildWebhookUrl(request);
     await configureEvolutionWebhook(webhookUrl);
-    const snapshot = await integrationSnapshot(profile.role);
+    const snapshot = await integrationSnapshot(auth.profile.role);
 
     return NextResponse.json({
       ...snapshot,
