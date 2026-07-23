@@ -6,6 +6,7 @@ import {
   loadAiBusinessSettings
 } from '@/lib/ai-business-settings';
 import { getAssistProCompanyId } from '@/lib/company';
+import { advancePipelineStage, deriveInboundPipelineStage } from '@/lib/pipeline';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { getAuthenticatedProfile } from '@/lib/supabase-server';
 
@@ -185,24 +186,33 @@ async function persistInbound(inbound: NormalizedInboundMessage) {
 
   const existingConversation = await supabase
     .from('whatsapp_conversations')
-    .select('id')
+    .select('id,status')
     .eq('company_id', companyId)
     .eq('phone', inbound.phone)
     .order('last_message_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  const inboundStage = deriveInboundPipelineStage(inbound.messageText);
   let conversationId = existingConversation.data?.id as string | undefined;
+  let currentStatus = existingConversation.data?.status as string | undefined;
+
   if (!conversationId) {
     const created = await supabase
       .from('whatsapp_conversations')
-      .insert({ company_id: companyId, customer_id: customerId, phone: inbound.phone, status: 'open' })
-      .select('id')
+      .insert({
+        company_id: companyId,
+        customer_id: customerId,
+        phone: inbound.phone,
+        status: inboundStage
+      })
+      .select('id,status')
       .single();
     if (created.error || !created.data?.id) {
       throw new Error(created.error?.message || 'Falha ao criar conversa.');
     }
     conversationId = created.data.id;
+    currentStatus = created.data.status;
   }
 
   if (inbound.providerMessageId) {
@@ -230,7 +240,11 @@ async function persistInbound(inbound: NormalizedInboundMessage) {
 
   await supabase
     .from('whatsapp_conversations')
-    .update({ customer_id: customerId, status: 'open', last_message_at: inbound.createdAt })
+    .update({
+      customer_id: customerId,
+      status: advancePipelineStage(currentStatus, inboundStage),
+      last_message_at: inbound.createdAt
+    })
     .eq('id', conversationId)
     .eq('company_id', companyId);
 
@@ -335,6 +349,7 @@ export async function GET() {
     forwardsOnlyInboundMessages: true,
     inboundPersistence: Boolean(getSupabaseAdmin()),
     businessContextConfigured: Boolean(getSupabaseAdmin()),
+    pipelineAutomation: true,
     audioConfigured: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID)
   });
 }
