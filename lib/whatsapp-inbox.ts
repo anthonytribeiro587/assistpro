@@ -1,5 +1,5 @@
-import { getAssistProCompanyId } from '@/lib/company';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { getAuthenticatedProfile } from '@/lib/supabase-server';
 
 export type InboxMessage = {
   id: string;
@@ -39,15 +39,29 @@ export async function loadWhatsappInbox(limit = 80): Promise<{
   configured: boolean;
   error?: string;
 }> {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
+    return {
+      conversations: [],
+      configured: true,
+      error: 'Seu usuário ainda não possui perfil na empresa.'
+    };
+  }
+
   const supabase = getSupabaseAdmin();
-  if (!supabase) return { conversations: [], configured: false, error: 'Supabase administrativo não configurado.' };
+  if (!supabase) {
+    return {
+      conversations: [],
+      configured: false,
+      error: 'Supabase administrativo não configurado.'
+    };
+  }
 
   try {
-    const companyId = await getAssistProCompanyId(supabase);
     const conversationResult = await supabase
       .from('whatsapp_conversations')
       .select('id,phone,status,human_takeover,last_message_at,customers(name)')
-      .eq('company_id', companyId)
+      .eq('company_id', profile.companyId)
       .order('last_message_at', { ascending: false })
       .limit(limit);
 
@@ -69,6 +83,7 @@ export async function loadWhatsappInbox(limit = 80): Promise<{
       const messageResult = await supabase
         .from('whatsapp_messages')
         .select('id,conversation_id,direction,message_type,content,media_url,ai_generated,created_at')
+        .eq('company_id', profile.companyId)
         .in('conversation_id', ids)
         .neq('message_type', 'system')
         .order('created_at', { ascending: true })
