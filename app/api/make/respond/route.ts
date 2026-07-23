@@ -14,6 +14,13 @@ type MakeResponseBody = {
   pipelineStage?: unknown;
 };
 
+type ConversationRecord = {
+  id: string;
+  company_id: string;
+  status: string | null;
+  service_order_id: string | null;
+};
+
 function providedSecret(request: NextRequest) {
   return (
     request.headers.get('x-assistpro-make-secret') ||
@@ -44,21 +51,39 @@ function validateAudioUrl(value: unknown) {
   return url.toString();
 }
 
-async function findConversation(phone: string) {
+async function findConversation(phone: string): Promise<ConversationRecord | null> {
   const supabase = getSupabaseAdmin();
   if (!supabase) return null;
 
   const companyId = process.env.ASSISTPRO_COMPANY_ID?.trim();
   let query = supabase
     .from('whatsapp_conversations')
-    .select('id,company_id,status')
+    .select('id,company_id,status,service_order_id')
     .eq('phone', phone)
     .order('last_message_at', { ascending: false })
     .limit(1);
 
   if (companyId) query = query.eq('company_id', companyId);
   const result = await query.maybeSingle();
-  return result.data || null;
+  return result.data ? (result.data as ConversationRecord) : null;
+}
+
+function claimsServiceOrderWasCreated(text: string) {
+  return [
+    /\b(?:os|ordem de servi[cç]o)\b.{0,60}\b(?:criad[ao]|abert[ao]|gerad[ao]|registrad[ao])\b/i,
+    /\b(?:criei|criamos|abri|abrimos|gerei|geramos|registrei|registramos)\b.{0,60}\b(?:os|ordem de servi[cç]o)\b/i,
+    /\b(?:os|ordem de servi[cç]o)\s*#?\d+\b/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function sanitizeGeneratedText(text: string, conversation: ConversationRecord | null) {
+  const falseCreationClaim = Boolean(text && !conversation?.service_order_id && claimsServiceOrderWasCreated(text));
+  if (!falseCreationClaim) return { text, falseCreationClaim: false };
+
+  return {
+    text: 'A pré-triagem foi registrada. A ordem de serviço será criada pela equipe quando o aparelho for entregue e conferido na JR Celular.',
+    falseCreationClaim: true
+  };
 }
 
 async function persistOutput(input: {
@@ -67,11 +92,12 @@ async function persistOutput(input: {
   audioUrl?: string;
   audioKey?: string;
   pipelineStage?: string;
+  conversation?: ConversationRecord | null;
 }) {
   const supabase = getSupabaseAdmin();
   if (!supabase) return { persisted: false, reason: 'supabase_not_configured' };
 
-  const conversation = await findConversation(input.phone);
+  const conversation = input.conversation || (await findConversation(input.phone));
   if (!conversation?.id || !conversation.company_id) {
     return { persisted: false, reason: 'conversation_not_found' };
   }
@@ -127,7 +153,8 @@ export async function GET() {
     ok: true,
     service: 'AssistPro Make response callback',
     accepts: ['text', 'audioUrl', 'audioKey', 'pipelineStage'],
-    pipelineAutomation: true
+    pipelineAutomation: true,
+    falseServiceOrderClaimProtection: true
   });
 }
 
@@ -146,16 +173,25 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as MakeResponseBody;
     const phone = normalizePhone(body.phone);
-    const text = String(body.text || '').trim().slice(0, 4000);
-    const audioUrl = validateAudioUrl(body.audioUrl);
+    const rawText = String(body.text || '').trim().slice(0, 4000);
+    let audioUrl = validateAudioUrl(body.audioUrl);
     const audioKey = String(body.audioKey || '').trim().slice(0, 80);
-    const pipelineStage = String(body.pipelineStage || '').trim().slice(0, 80);
+    let pipelineStage = String(body.pipelineStage || '').trim().slice(0, 80);
 
-    if (!phone || (!text && !audioUrl)) {
+    if (!phone || (!rawText && !audioUrl)) {
       return NextResponse.json(
         { ok: false, error: 'Informe phone e pelo menos text ou audioUrl.' },
         { status: 400 }
       );
+    }
+
+    const conversation = await findConversation(phone);
+    const sanitized = sanitizeGeneratedText(rawText, conversation);
+    const text = sanitized.text;
+
+    if (sanitized.falseCreationClaim) {
+      audioUrl = null;
+      pipelineStage = 'encaminhado_loja';
     }
 
     const sendTextWithAudio = parseBoolean(body.sendTextWithAudio);
@@ -171,10 +207,16 @@ export async function POST(request: NextRequest) {
       text: text || undefined,
       audioUrl: audioUrl || undefined,
       audioKey: audioKey || undefined,
-      pipelineStage: pipelineStage || undefined
+      pipelineStage: pipelineStage || undefined,
+      conversation
     });
 
-    return NextResponse.json({ ok: true, delivery, persistence });
+    return NextResponse.json({
+      ok: true,
+      delivery,
+      persistence,
+      sanitizedFalseServiceOrderClaim: sanitized.falseCreationClaim
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Não foi possível enviar a resposta do Make.';
     console.error('AssistPro Make callback error', message);
