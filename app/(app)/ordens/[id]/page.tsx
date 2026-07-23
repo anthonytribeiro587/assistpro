@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   CalendarDays,
   CircleDollarSign,
+  FileText,
+  ListChecks,
   MessageCircle,
   ShieldCheck,
   Smartphone,
@@ -12,10 +14,10 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import {
-  loadServiceOrder,
   serviceOrderStatusClasses,
   serviceOrderStatusLabels
 } from '@/lib/service-order-data';
+import { loadServiceOrder } from '@/lib/service-order-server';
 import { formatMoney } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -122,6 +124,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-slate-950"><CalendarDays className="h-4 w-4 text-violet-600" /><strong className="text-sm">Prazos</strong></div>
             <div className="mt-3 space-y-2 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-500">Previsão</span><strong className="text-right">{formatDate(order.dueDate)}</strong></div><div className="flex justify-between gap-3"><span className="text-slate-500">Garantia</span><strong>{order.warrantyDays} dias</strong></div></div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Link href={`/ordens/${id}/orcamento`} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700 transition hover:border-violet-300 hover:text-violet-700"><FileText className="h-4 w-4" /> Orçamento</Link>
+            <Link href={`/ordens/${id}/etapas`} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700 transition hover:border-violet-300 hover:text-violet-700"><ListChecks className="h-4 w-4" /> Etapas</Link>
           </div>
 
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
