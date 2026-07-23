@@ -46,19 +46,35 @@ after insert on auth.users
 for each row execute procedure public.handle_new_assistpro_user();
 
 -- Cria perfil para usuários que já existiam antes desta migration.
+with pending_users as (
+  select
+    user_row.id,
+    user_row.email,
+    user_row.raw_user_meta_data,
+    row_number() over (order by user_row.created_at asc, user_row.id) as position
+  from auth.users user_row
+  where not exists (
+    select 1 from public.profiles profile where profile.id = user_row.id
+  )
+), company_row as (
+  select id from public.companies order by created_at asc limit 1
+), profile_state as (
+  select exists(select 1 from public.profiles) as already_has_profile
+)
 insert into public.profiles (id, company_id, full_name, role)
 select
-  user_row.id,
+  pending_users.id,
   company_row.id,
-  coalesce(nullif(user_row.raw_user_meta_data ->> 'full_name', ''), split_part(user_row.email, '@', 1), 'Usuário'),
+  coalesce(
+    nullif(pending_users.raw_user_meta_data ->> 'full_name', ''),
+    split_part(pending_users.email, '@', 1),
+    'Usuário'
+  ),
   case
-    when not exists (select 1 from public.profiles) then 'owner'::public.user_role
+    when not profile_state.already_has_profile and pending_users.position = 1
+      then 'owner'::public.user_role
     else 'attendant'::public.user_role
   end
-from auth.users user_row
-cross join lateral (
-  select id from public.companies order by created_at asc limit 1
-) company_row
-where not exists (
-  select 1 from public.profiles profile where profile.id = user_row.id
-);
+from pending_users
+cross join company_row
+cross join profile_state;
