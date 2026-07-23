@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { BarChart3, Bot, Headphones, Home, MessageCircle, Settings, Smartphone, UsersRound, Wrench } from 'lucide-react';
+import { BarChart3, Home, MessageCircle, Settings, UsersRound, Wrench } from 'lucide-react';
 
 export type ServiceOrderStatus =
   | 'received'
@@ -34,6 +34,12 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
+  description?: string;
+};
+
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
 };
 
 export const statusLabels: Record<ServiceOrderStatus, string> = {
@@ -62,16 +68,29 @@ export const statusTone: Record<ServiceOrderStatus, string> = {
   canceled: 'bg-red-50 text-red-700 ring-red-100'
 };
 
-export const navItems: NavItem[] = [
-  { label: 'Início', href: '/dashboard', icon: Home },
-  { label: 'OS', href: '/ordens', icon: Wrench },
-  { label: 'Clientes', href: '/clientes', icon: UsersRound },
-  { label: 'WhatsApp', href: '/whatsapp', icon: MessageCircle },
-  { label: 'IA', href: '/whatsapp/chat', icon: Bot },
-  { label: 'Voz do JR', href: '/voz', icon: Headphones },
-  { label: 'Relatórios', href: '/relatorios', icon: BarChart3 },
-  { label: 'Configurações', href: '/configuracoes', icon: Settings }
+export const navGroups: NavGroup[] = [
+  {
+    label: 'Operação',
+    items: [
+      { label: 'Visão geral', href: '/dashboard', icon: Home },
+      { label: 'Ordens de serviço', href: '/ordens', icon: Wrench },
+      { label: 'Clientes', href: '/clientes', icon: UsersRound }
+    ]
+  },
+  {
+    label: 'Atendimento',
+    items: [{ label: 'WhatsApp', href: '/whatsapp', icon: MessageCircle }]
+  },
+  {
+    label: 'Gestão',
+    items: [
+      { label: 'Relatórios', href: '/relatorios', icon: BarChart3 },
+      { label: 'Administração', href: '/configuracoes', icon: Settings }
+    ]
+  }
 ];
+
+export const navItems = navGroups.flatMap((group) => group.items);
 
 export const serviceOrders: ServiceOrder[] = [
   {
@@ -160,6 +179,7 @@ export const timeline: ServiceOrderStatus[] = [
   'quote_sent',
   'waiting_approval',
   'in_progress',
+  'waiting_part',
   'quality_test',
   'ready',
   'delivered'
