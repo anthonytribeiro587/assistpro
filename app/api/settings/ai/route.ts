@@ -25,7 +25,7 @@ function secretsMatch(provided: string, expected: string) {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-async function requireProfile() {
+async function requireAdministrator() {
   const profile = await getAuthenticatedProfile();
   if (!profile) {
     return {
@@ -39,11 +39,22 @@ async function requireProfile() {
       )
     };
   }
+
+  if (!hasAnyRole(profile, ['owner', 'admin'])) {
+    return {
+      profile,
+      response: NextResponse.json(
+        { ok: false, error: 'Apenas proprietário ou administrador pode acessar estas configurações.' },
+        { status: 403 }
+      )
+    };
+  }
+
   return { profile, response: null };
 }
 
 export async function GET() {
-  const auth = await requireProfile();
+  const auth = await requireAdministrator();
   if (auth.response || !auth.profile) return auth.response;
 
   const supabase = getSupabaseAdmin();
@@ -62,7 +73,7 @@ export async function GET() {
         ok: true,
         companyId: auth.profile.companyId,
         role: auth.profile.role,
-        canEdit: hasAnyRole(auth.profile, ['owner', 'admin']),
+        canEdit: true,
         ...result,
         writeProtectionConfigured: Boolean(process.env.ASSISTPRO_ADMIN_SECRET?.trim())
       },
@@ -76,15 +87,8 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireProfile();
+  const auth = await requireAdministrator();
   if (auth.response || !auth.profile) return auth.response;
-
-  if (!hasAnyRole(auth.profile, ['owner', 'admin'])) {
-    return NextResponse.json(
-      { ok: false, error: 'Apenas proprietário ou administrador pode alterar estas configurações.' },
-      { status: 403 }
-    );
-  }
 
   const expectedSecret = process.env.ASSISTPRO_ADMIN_SECRET?.trim();
   if (!expectedSecret) {
