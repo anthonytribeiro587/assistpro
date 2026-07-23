@@ -13,6 +13,10 @@ function configured(value?: string) {
   return Boolean(String(value || '').trim());
 }
 
+function deploymentEnvironment() {
+  return process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV || 'unknown';
+}
+
 function buildWebhookUrl(request: NextRequest) {
   const expectedSecret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
   if (!expectedSecret) throw new Error('WHATSAPP_WEBHOOK_SECRET não está configurado.');
@@ -49,10 +53,15 @@ async function integrationSnapshot(profileRole: string) {
     evolution.error = error instanceof Error ? error.message : 'Falha ao consultar a Evolution.';
   }
 
+  const environment = deploymentEnvironment();
+  const canManage = profileRole === 'owner' || profileRole === 'admin';
+
   return {
     ok: true,
     role: profileRole,
-    canManage: profileRole === 'owner' || profileRole === 'admin',
+    environment,
+    canManage,
+    canConfigureWebhook: canManage && environment === 'production',
     evolution,
     make: {
       webhookConfigured: configured(process.env.MAKE_WEBHOOK_URL),
@@ -106,6 +115,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { ok: false, error: 'Apenas proprietário ou administrador pode alterar integrações.' },
       { status: 403 }
+    );
+  }
+
+  if (deploymentEnvironment() !== 'production') {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'A configuração do webhook só pode ser alterada no ambiente de produção.'
+      },
+      { status: 409 }
     );
   }
 
