@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck, Wrench } from 'lucide-react';
 import { z } from 'zod';
@@ -23,7 +23,6 @@ function safeNextPath(value: string | null) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const {
@@ -50,7 +49,10 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace(safeNextPath(searchParams.get('next')));
+      const nextPath = typeof window === 'undefined'
+        ? '/dashboard'
+        : safeNextPath(new URLSearchParams(window.location.search).get('next'));
+      router.replace(nextPath);
       router.refresh();
     } catch {
       setMessage('Não foi possível acessar o sistema agora. Tente novamente em instantes.');
