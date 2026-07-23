@@ -17,7 +17,9 @@ type StatusPayload = {
   error?: string;
   message?: string;
   role?: string;
+  environment?: string;
   canManage?: boolean;
+  canConfigureWebhook?: boolean;
   evolution?: {
     configured?: boolean;
     connected?: boolean;
@@ -164,7 +166,7 @@ export function IntegrationStatus() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
           </button>
-          {status?.canManage ? (
+          {status?.canConfigureWebhook ? (
             <button
               type="button"
               onClick={configureWebhook}
@@ -186,6 +188,12 @@ export function IntegrationStatus() {
         <span className="mt-5 inline-flex items-center gap-2 text-sm text-slate-300">
           <Loader2 className="h-4 w-4 animate-spin" /> Verificando integrações...
         </span>
+      ) : null}
+
+      {status?.canManage && !status.canConfigureWebhook ? (
+        <p className="mt-4 rounded-xl border border-blue-400/20 bg-blue-400/10 p-3 text-sm font-semibold text-blue-200">
+          Este é um ambiente {status.environment || 'de teste'}. A conexão pode ser consultada, mas o webhook real só pode ser alterado na produção.
+        </p>
       ) : null}
 
       {error ? (
@@ -221,7 +229,9 @@ export function IntegrationStatus() {
               <strong className="mt-3 block text-sm">Make AI Agent</strong>
               <p className="mt-1 text-xs text-slate-400">Entrada, autenticação e callback</p>
               <div className="mt-3">
-                <Badge active={makeReady}>{makeReady ? 'Fluxo configurado' : 'Configuração incompleta'}</Badge>
+                <Badge active={makeReady}>
+                  {makeReady ? 'Fluxo configurado' : 'Configuração incompleta'}
+                </Badge>
               </div>
             </div>
 
@@ -230,7 +240,9 @@ export function IntegrationStatus() {
               <strong className="mt-3 block text-sm">Supabase</strong>
               <p className="mt-1 text-xs text-slate-400">Auth, histórico e parâmetros</p>
               <div className="mt-3">
-                <Badge active={supabaseReady}>{supabaseReady ? 'Banco disponível' : 'Revisar variáveis'}</Badge>
+                <Badge active={supabaseReady}>
+                  {supabaseReady ? 'Banco disponível' : 'Revisar variáveis'}
+                </Badge>
               </div>
             </div>
 
@@ -252,7 +264,7 @@ export function IntegrationStatus() {
             </p>
           ) : null}
           <p className="mt-4 text-[11px] leading-5 text-slate-500">
-            Endpoint protegido: {status.webhook?.endpoint || '/api/whatsapp/orchestrator?secret=***'} • Permissão atual: {status.role || 'não identificada'}
+            Endpoint protegido: {status.webhook?.endpoint || '/api/whatsapp/orchestrator?secret=***'} • Perfil: {status.role || 'não identificado'} • Ambiente: {status.environment || 'não identificado'}
           </p>
         </>
       ) : null}
