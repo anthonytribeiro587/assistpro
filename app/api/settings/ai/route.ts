@@ -1,11 +1,12 @@
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   aiBusinessSettingsToRow,
   loadAiBusinessSettings,
   sanitizeAiBusinessSettings
 } from '@/lib/ai-business-settings';
-import { getAssistProCompanyId } from '@/lib/company';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { getAuthenticatedProfile, hasAnyRole } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,45 @@ function providedAdminSecret(request: NextRequest) {
   );
 }
 
+function secretsMatch(provided: string, expected: string) {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+async function requireAdministrator() {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
+    return {
+      profile: null,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: 'Seu usuário ainda não possui perfil na empresa. Execute a migration de perfis.'
+        },
+        { status: 403 }
+      )
+    };
+  }
+
+  if (!hasAnyRole(profile, ['owner', 'admin'])) {
+    return {
+      profile,
+      response: NextResponse.json(
+        { ok: false, error: 'Apenas proprietário ou administrador pode acessar estas configurações.' },
+        { status: 403 }
+      )
+    };
+  }
+
+  return { profile, response: null };
+}
+
 export async function GET() {
+  const auth = await requireAdministrator();
+  if (auth.response || !auth.profile) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json(
@@ -27,13 +66,14 @@ export async function GET() {
   }
 
   try {
-    const companyId = await getAssistProCompanyId(supabase);
-    const result = await loadAiBusinessSettings(supabase, companyId);
+    const result = await loadAiBusinessSettings(supabase, auth.profile.companyId);
 
     return NextResponse.json(
       {
         ok: true,
-        companyId,
+        companyId: auth.profile.companyId,
+        role: auth.profile.role,
+        canEdit: true,
         ...result,
         writeProtectionConfigured: Boolean(process.env.ASSISTPRO_ADMIN_SECRET?.trim())
       },
@@ -47,6 +87,9 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const auth = await requireAdministrator();
+  if (auth.response || !auth.profile) return auth.response;
+
   const expectedSecret = process.env.ASSISTPRO_ADMIN_SECRET?.trim();
   if (!expectedSecret) {
     return NextResponse.json(
@@ -58,7 +101,7 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  if (providedAdminSecret(request) !== expectedSecret) {
+  if (!secretsMatch(providedAdminSecret(request), expectedSecret)) {
     return NextResponse.json({ ok: false, error: 'Código administrativo inválido.' }, { status: 401 });
   }
 
@@ -73,13 +116,12 @@ export async function PUT(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const settings = sanitizeAiBusinessSettings(body?.settings);
-    const companyId = await getAssistProCompanyId(supabase);
 
     const saved = await supabase
       .from('ai_business_settings')
       .upsert(
         {
-          company_id: companyId,
+          company_id: auth.profile.companyId,
           ...aiBusinessSettingsToRow(settings),
           updated_at: new Date().toISOString()
         },
@@ -102,8 +144,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const result = await loadAiBusinessSettings(supabase, companyId);
-    return NextResponse.json({ ok: true, companyId, ...result });
+    const result = await loadAiBusinessSettings(supabase, auth.profile.companyId);
+    return NextResponse.json({ ok: true, companyId: auth.profile.companyId, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Não foi possível salvar as configurações.';
     console.error('AssistPro AI settings PUT error', message);
