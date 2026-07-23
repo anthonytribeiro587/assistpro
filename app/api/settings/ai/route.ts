@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   aiBusinessSettingsToRow,
@@ -6,6 +7,7 @@ import {
 } from '@/lib/ai-business-settings';
 import { getAssistProCompanyId } from '@/lib/company';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { getAuthenticatedUser } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +19,28 @@ function providedAdminSecret(request: NextRequest) {
   );
 }
 
+function secretsMatch(provided: string, expected: string) {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+async function requireUser() {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return {
+      user: null,
+      response: NextResponse.json({ ok: false, error: 'Sessão não autenticada.' }, { status: 401 })
+    };
+  }
+  return { user, response: null };
+}
+
 export async function GET() {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json(
@@ -47,6 +70,9 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
+
   const expectedSecret = process.env.ASSISTPRO_ADMIN_SECRET?.trim();
   if (!expectedSecret) {
     return NextResponse.json(
@@ -58,7 +84,7 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  if (providedAdminSecret(request) !== expectedSecret) {
+  if (!secretsMatch(providedAdminSecret(request), expectedSecret)) {
     return NextResponse.json({ ok: false, error: 'Código administrativo inválido.' }, { status: 401 });
   }
 
