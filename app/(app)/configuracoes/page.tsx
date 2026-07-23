@@ -1,24 +1,21 @@
-import { Bot, KeyRound, ShieldCheck } from 'lucide-react';
+import { Bot } from 'lucide-react';
+import { AiBusinessSettingsForm } from '@/components/settings/ai-business-settings-form';
 import { PageHeader } from '@/components/ui/page-header';
 
 export default function SettingsPage() {
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="Administração" title="Configurações" description="Ajustes de empresa, permissões, Evolution API e políticas do atendente virtual." />
-      <section className="grid gap-5 xl:grid-cols-3">
-        {[
-          { title: 'Empresa', description: 'Nome, telefone, endereço e identidade visual.', icon: ShieldCheck },
-          { title: 'Evolution API', description: 'Instância, webhooks e status de conexão.', icon: KeyRound },
-          { title: 'Atendente IA', description: 'Regras de atendimento, handoff e voz autorizada.', icon: Bot }
-        ].map((item) => (
-          <article key={item.title} className="rounded-[1.75rem] border border-line bg-white p-5 shadow-card">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brandLight text-brand"><item.icon className="h-5 w-5" /></span>
-            <h2 className="mt-4 text-xl font-black text-ink">{item.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">{item.description}</p>
-            <button className="mt-5 rounded-2xl border border-line px-4 py-3 text-sm font-bold text-ink">Configurar</button>
-          </article>
-        ))}
-      </section>
+      <PageHeader
+        eyebrow="Administração • Atendimento inteligente"
+        title="Configurações da IA"
+        description="Parametrize dados da loja, horários, regras, mensagens e automações sem depender de alterações manuais no prompt."
+        action={
+          <span className="inline-flex items-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-black text-brand">
+            <Bot className="h-4 w-4" /> AssistPro IA
+          </span>
+        }
+      />
+      <AiBusinessSettingsForm />
     </div>
   );
 }
