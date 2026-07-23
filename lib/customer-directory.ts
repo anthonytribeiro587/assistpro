@@ -6,6 +6,7 @@ export type CustomerDirectoryRow = {
   id: string;
   name: string;
   phone: string;
+  document: string;
   notes: string;
   createdAt: string;
   totalOrders: number;
@@ -39,7 +40,7 @@ export async function loadCustomerDirectory(): Promise<{
     const [customersResult, ordersResult, conversationsResult] = await Promise.all([
       supabase
         .from('customers')
-        .select('id,name,phone,notes,created_at')
+        .select('id,name,phone,document,notes,created_at')
         .eq('company_id', profile.companyId)
         .order('created_at', { ascending: false }),
       supabase
@@ -103,6 +104,7 @@ export async function loadCustomerDirectory(): Promise<{
         id: customerId,
         name: String(customer.name || 'Cliente sem nome'),
         phone: String(customer.phone || ''),
+        document: String(customer.document || ''),
         notes: String(customer.notes || ''),
         createdAt: String(customer.created_at || ''),
         totalOrders: orders.length,
