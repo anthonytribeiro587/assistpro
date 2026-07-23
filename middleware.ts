@@ -34,6 +34,14 @@ function isPublicApi(request: NextRequest) {
   return false;
 }
 
+function securityHeaders(response: NextResponse) {
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
   const { pathname } = request.nextUrl;
@@ -42,7 +50,7 @@ export async function middleware(request: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    if (isPublicPath(pathname) || publicApi) return response;
+    if (isPublicPath(pathname) || publicApi) return securityHeaders(response);
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { ok: false, error: 'Autenticação do CRM não configurada.' },
@@ -55,6 +63,10 @@ export async function middleware(request: NextRequest) {
     loginUrl.search = 'error=configuration';
     return NextResponse.redirect(loginUrl);
   }
+
+  // Webhooks usam segredos próprios nas respectivas rotas. Evita uma consulta ao Auth
+  // em cada mensagem recebida e mantém a entrada do WhatsApp mais rápida.
+  if (publicApi) return securityHeaders(response);
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -73,7 +85,7 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if (pathname.startsWith('/api/') && !publicApi && !user) {
+  if (pathname.startsWith('/api/') && !user) {
     return NextResponse.json({ ok: false, error: 'Sessão não autenticada.' }, { status: 401 });
   }
 
@@ -91,11 +103,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(dashboardUrl);
   }
 
-  response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'DENY');
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
-  return response;
+  return securityHeaders(response);
 }
 
 export const config = {
