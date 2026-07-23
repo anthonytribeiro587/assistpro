@@ -5,9 +5,8 @@ import {
   loadAiBusinessSettings,
   sanitizeAiBusinessSettings
 } from '@/lib/ai-business-settings';
-import { getAssistProCompanyId } from '@/lib/company';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
-import { getAuthenticatedUser } from '@/lib/supabase-server';
+import { getAuthenticatedProfile, hasAnyRole } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,20 +25,26 @@ function secretsMatch(provided: string, expected: string) {
   return timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-async function requireUser() {
-  const user = await getAuthenticatedUser();
-  if (!user) {
+async function requireProfile() {
+  const profile = await getAuthenticatedProfile();
+  if (!profile) {
     return {
-      user: null,
-      response: NextResponse.json({ ok: false, error: 'Sessão não autenticada.' }, { status: 401 })
+      profile: null,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: 'Seu usuário ainda não possui perfil na empresa. Execute a migration de perfis.'
+        },
+        { status: 403 }
+      )
     };
   }
-  return { user, response: null };
+  return { profile, response: null };
 }
 
 export async function GET() {
-  const auth = await requireUser();
-  if (auth.response) return auth.response;
+  const auth = await requireProfile();
+  if (auth.response || !auth.profile) return auth.response;
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {
@@ -50,13 +55,14 @@ export async function GET() {
   }
 
   try {
-    const companyId = await getAssistProCompanyId(supabase);
-    const result = await loadAiBusinessSettings(supabase, companyId);
+    const result = await loadAiBusinessSettings(supabase, auth.profile.companyId);
 
     return NextResponse.json(
       {
         ok: true,
-        companyId,
+        companyId: auth.profile.companyId,
+        role: auth.profile.role,
+        canEdit: hasAnyRole(auth.profile, ['owner', 'admin']),
         ...result,
         writeProtectionConfigured: Boolean(process.env.ASSISTPRO_ADMIN_SECRET?.trim())
       },
@@ -70,8 +76,15 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireUser();
-  if (auth.response) return auth.response;
+  const auth = await requireProfile();
+  if (auth.response || !auth.profile) return auth.response;
+
+  if (!hasAnyRole(auth.profile, ['owner', 'admin'])) {
+    return NextResponse.json(
+      { ok: false, error: 'Apenas proprietário ou administrador pode alterar estas configurações.' },
+      { status: 403 }
+    );
+  }
 
   const expectedSecret = process.env.ASSISTPRO_ADMIN_SECRET?.trim();
   if (!expectedSecret) {
@@ -99,13 +112,12 @@ export async function PUT(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const settings = sanitizeAiBusinessSettings(body?.settings);
-    const companyId = await getAssistProCompanyId(supabase);
 
     const saved = await supabase
       .from('ai_business_settings')
       .upsert(
         {
-          company_id: companyId,
+          company_id: auth.profile.companyId,
           ...aiBusinessSettingsToRow(settings),
           updated_at: new Date().toISOString()
         },
@@ -128,8 +140,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const result = await loadAiBusinessSettings(supabase, companyId);
-    return NextResponse.json({ ok: true, companyId, ...result });
+    const result = await loadAiBusinessSettings(supabase, auth.profile.companyId);
+    return NextResponse.json({ ok: true, companyId: auth.profile.companyId, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Não foi possível salvar as configurações.';
     console.error('AssistPro AI settings PUT error', message);
