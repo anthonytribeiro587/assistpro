@@ -8,29 +8,41 @@ type CookieToSet = {
 };
 
 const PUBLIC_PATHS = ['/login'];
-const PUBLIC_API_PREFIXES = [
-  '/api/make/',
-  '/api/whatsapp/orchestrator',
-  '/api/whatsapp/webhook',
-  '/api/whatsapp/remote-triage'
-];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-function isPublicApi(pathname: string) {
-  return PUBLIC_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix));
+function isPublicApi(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith('/api/make/')) return true;
+  if (pathname === '/api/whatsapp/orchestrator') return true;
+  if (pathname === '/api/whatsapp/webhook') return true;
+
+  if (pathname === '/api/whatsapp/remote-triage') {
+    const expectedSecret = process.env.WHATSAPP_WEBHOOK_SECRET?.trim();
+    const providedSecret =
+      request.nextUrl.searchParams.get('secret') ||
+      request.headers.get('x-assistpro-webhook-secret') ||
+      request.headers.get('x-webhook-secret') ||
+      request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
+      '';
+    return Boolean(expectedSecret && providedSecret === expectedSecret);
+  }
+
+  return false;
 }
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
   const { pathname } = request.nextUrl;
+  const publicApi = isPublicApi(request);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    if (isPublicPath(pathname) || isPublicApi(pathname)) return response;
+    if (isPublicPath(pathname) || publicApi) return response;
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { ok: false, error: 'Autenticação do CRM não configurada.' },
@@ -61,7 +73,7 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if (pathname.startsWith('/api/') && !isPublicApi(pathname) && !user) {
+  if (pathname.startsWith('/api/') && !publicApi && !user) {
     return NextResponse.json({ ok: false, error: 'Sessão não autenticada.' }, { status: 401 });
   }
 
