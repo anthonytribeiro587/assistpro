@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { advancePipelineStage, deriveOutboundPipelineStage } from '@/lib/pipeline';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { sendAudioMessage, sendEvolutionText } from '@/lib/evolution';
 
@@ -9,6 +10,8 @@ type MakeResponseBody = {
   text?: unknown;
   audioUrl?: unknown;
   sendTextWithAudio?: unknown;
+  audioKey?: unknown;
+  pipelineStage?: unknown;
 };
 
 function providedSecret(request: NextRequest) {
@@ -48,7 +51,7 @@ async function findConversation(phone: string) {
   const companyId = process.env.ASSISTPRO_COMPANY_ID?.trim();
   let query = supabase
     .from('whatsapp_conversations')
-    .select('id,company_id')
+    .select('id,company_id,status')
     .eq('phone', phone)
     .order('last_message_at', { ascending: false })
     .limit(1);
@@ -58,7 +61,13 @@ async function findConversation(phone: string) {
   return result.data || null;
 }
 
-async function persistOutput(input: { phone: string; text?: string; audioUrl?: string }) {
+async function persistOutput(input: {
+  phone: string;
+  text?: string;
+  audioUrl?: string;
+  audioKey?: string;
+  pipelineStage?: string;
+}) {
   const supabase = getSupabaseAdmin();
   if (!supabase) return { persisted: false, reason: 'supabase_not_configured' };
 
@@ -95,19 +104,30 @@ async function persistOutput(input: { phone: string; text?: string; audioUrl?: s
   const inserted = await supabase.from('whatsapp_messages').insert(rows);
   if (inserted.error) throw new Error(inserted.error.message);
 
+  const proposedStage = deriveOutboundPipelineStage({
+    text: input.text,
+    audioKey: input.audioKey,
+    explicitStage: input.pipelineStage
+  });
+  const nextStatus = proposedStage
+    ? advancePipelineStage(String(conversation.status || ''), proposedStage)
+    : String(conversation.status || 'contato_iniciado');
+
   await supabase
     .from('whatsapp_conversations')
-    .update({ last_message_at: new Date().toISOString() })
-    .eq('id', conversation.id);
+    .update({ last_message_at: new Date().toISOString(), status: nextStatus })
+    .eq('id', conversation.id)
+    .eq('company_id', conversation.company_id);
 
-  return { persisted: true, conversationId: conversation.id };
+  return { persisted: true, conversationId: conversation.id, pipelineStage: nextStatus };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
     service: 'AssistPro Make response callback',
-    accepts: ['text', 'audioUrl']
+    accepts: ['text', 'audioUrl', 'audioKey', 'pipelineStage'],
+    pipelineAutomation: true
   });
 }
 
@@ -128,6 +148,8 @@ export async function POST(request: NextRequest) {
     const phone = normalizePhone(body.phone);
     const text = String(body.text || '').trim().slice(0, 4000);
     const audioUrl = validateAudioUrl(body.audioUrl);
+    const audioKey = String(body.audioKey || '').trim().slice(0, 80);
+    const pipelineStage = String(body.pipelineStage || '').trim().slice(0, 80);
 
     if (!phone || (!text && !audioUrl)) {
       return NextResponse.json(
@@ -147,7 +169,9 @@ export async function POST(request: NextRequest) {
     const persistence = await persistOutput({
       phone,
       text: text || undefined,
-      audioUrl: audioUrl || undefined
+      audioUrl: audioUrl || undefined,
+      audioKey: audioKey || undefined,
+      pipelineStage: pipelineStage || undefined
     });
 
     return NextResponse.json({ ok: true, delivery, persistence });
